@@ -45,5 +45,12 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<!-- Location permissions -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>WorkConnect needs access to your location to find nearby workers and show your position on the map.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>WorkConnect needs access to your location to track job progress and help workers navigate to your location.</string>
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>WorkConnect needs background location access to provide real-time tracking during active jobs.</string>
 </dict>
 </plist>

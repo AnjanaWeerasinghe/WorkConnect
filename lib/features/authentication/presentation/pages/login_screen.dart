@@ -291,6 +291,9 @@ class _LoginScreenState extends State<LoginScreen> {
                     border: OutlineInputBorder(),
                   ),
                   keyboardType: TextInputType.emailAddress,
+                  textInputAction: TextInputAction.next,
+                  autocorrect: false,
+                  enableSuggestions: true,
                   validator: (value) {
                     if (value == null || value.isEmpty) {
                       return 'Please enter your email';

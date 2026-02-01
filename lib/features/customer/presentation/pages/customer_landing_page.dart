@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../../../data/models/user_model.dart';
+import '../../../../data/models/location_model.dart';
 import '../../../../data/repositories/auth_repository.dart';
+import '../../../../core/services/location_service.dart';
 import '../../../worker/presentation/worker_list_screen.dart';
+import '../../../location/presentation/pages/location_picker_screen.dart';
+import '../../../location/presentation/pages/workers_map_screen.dart';
 
 class CustomerLandingPage extends StatefulWidget {
   final UserModel user;
@@ -15,6 +19,53 @@ class CustomerLandingPage extends StatefulWidget {
 
 class _CustomerLandingPageState extends State<CustomerLandingPage> {
   final AuthRepository _authRepository = AuthRepository();
+  final LocationService _locationService = LocationService();
+  
+  LocationModel? _currentLocation;
+  bool _isLoadingLocation = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCurrentLocation();
+  }
+
+  Future<void> _loadCurrentLocation() async {
+    setState(() {
+      _isLoadingLocation = true;
+    });
+    
+    final result = await _locationService.getCurrentLocation();
+    if (result.isSuccess && result.data != null) {
+      setState(() {
+        _currentLocation = result.data;
+      });
+    }
+    
+    setState(() {
+      _isLoadingLocation = false;
+    });
+  }
+
+  Future<void> _selectLocationOnMap() async {
+    final selectedLocation = await LocationPickerScreen.pickLocation(
+      context,
+      initialLocation: _currentLocation,
+      title: 'Select Your Location',
+    );
+    
+    if (selectedLocation != null) {
+      setState(() {
+        _currentLocation = selectedLocation;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Location updated: ${selectedLocation.address ?? "Location set"}'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
+  }
 
   final List<Map<String, dynamic>> _services = [
     {
@@ -180,38 +231,83 @@ class _CustomerLandingPageState extends State<CustomerLandingPage> {
                     ),
                   ),
                   SizedBox(height: 20),
-                  ElevatedButton(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => WorkerListScreen(),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => WorkerListScreen(),
+                              ),
+                            );
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: Colors.orange,
+                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(25),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.list, size: 20),
+                              SizedBox(width: 8),
+                              Text(
+                                'List View',
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                          ),
                         ),
-                      );
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: Colors.orange,
-                      padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(25),
                       ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.search, size: 20),
-                        SizedBox(width: 8),
-                        Text(
-                          'Find Workers Near Me',
-                          style: TextStyle(fontWeight: FontWeight.bold),
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => WorkersMapScreen(
+                                  initialLocation: _currentLocation,
+                                ),
+                              ),
+                            );
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: Colors.orange,
+                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(25),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.map, size: 20),
+                              SizedBox(width: 8),
+                              Text(
+                                'Map View',
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                          ),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
+
+            SizedBox(height: 16),
+
+            // Current Location Card
+            _buildLocationCard(),
 
             SizedBox(height: 32),
 
@@ -443,6 +539,137 @@ class _CustomerLandingPageState extends State<CustomerLandingPage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildLocationCard() {
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 8,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.green.shade50,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  Icons.location_on,
+                  color: Colors.green,
+                  size: 24,
+                ),
+              ),
+              SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Your Location',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        color: Colors.grey[800],
+                      ),
+                    ),
+                    SizedBox(height: 4),
+                    if (_isLoadingLocation)
+                      Row(
+                        children: [
+                          SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(Colors.green),
+                            ),
+                          ),
+                          SizedBox(width: 8),
+                          Text(
+                            'Getting location...',
+                            style: TextStyle(
+                              color: Colors.grey[600],
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
+                      )
+                    else if (_currentLocation != null)
+                      Text(
+                        _currentLocation!.address ?? 
+                          '${_currentLocation!.latitude.toStringAsFixed(4)}, ${_currentLocation!.longitude.toStringAsFixed(4)}',
+                        style: TextStyle(
+                          color: Colors.grey[600],
+                          fontSize: 14,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      )
+                    else
+                      Text(
+                        'Location not set',
+                        style: TextStyle(
+                          color: Colors.grey[500],
+                          fontSize: 14,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _loadCurrentLocation,
+                  icon: Icon(Icons.my_location, size: 18),
+                  label: Text('Use Current'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.green,
+                    side: BorderSide(color: Colors.green),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+              ),
+              SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _selectLocationOnMap,
+                  icon: Icon(Icons.map, size: 18),
+                  label: Text('Select on Map'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../../../../data/models/user_model.dart';
 import '../../../../data/repositories/auth_repository.dart';
 import '../../../worker/presentation/worker_dashboard_screen.dart';
+import '../../../location/presentation/pages/jobs_map_screen.dart';
 
 class WorkerLandingPage extends StatefulWidget {
   final UserModel user;
@@ -242,7 +243,39 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
                               Icon(Icons.dashboard, size: 20),
                               SizedBox(width: 8),
                               Text(
-                                'Open Dashboard',
+                                'Dashboard',
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => JobsMapScreen(),
+                              ),
+                            );
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: Colors.green,
+                            padding: EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(25),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.map, size: 20),
+                              SizedBox(width: 8),
+                              Text(
+                                'Find Jobs',
                                 style: TextStyle(fontWeight: FontWeight.bold),
                               ),
                             ],
