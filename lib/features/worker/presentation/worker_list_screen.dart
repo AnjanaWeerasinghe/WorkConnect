@@ -27,6 +27,19 @@ class _WorkerListScreenState extends State<WorkerListScreen> {
   String _selectedCategory = 'All';
   Position? _currentPosition;
 
+  static const Map<String, List<String>> _categoryKeywords = {
+    'Plumber': ['plumber', 'plumbing'],
+    'Electrician': ['electrician', 'electrical', 'wiring'],
+    'Mechanic': ['mechanic', 'mechanical', 'auto', 'vehicle'],
+    'Technician': ['technician', 'technical', 'tech'],
+    'Carpenter': ['carpenter', 'carpentry', 'woodwork'],
+    'Painter': ['painter', 'painting'],
+    'Cleaner': ['cleaner', 'cleaning', 'housekeeping'],
+    'Gardener': ['gardener', 'gardening', 'landscaping'],
+    'AC Repair': ['ac repair', 'air conditioning', 'hvac'],
+    'Appliance Repair': ['appliance repair', 'appliance', 'repair'],
+  };
+
   @override
   void initState() {
     super.initState();
@@ -56,18 +69,18 @@ class _WorkerListScreenState extends State<WorkerListScreen> {
 
   Future<void> _loadWorkers() async {
     try {
-      Query query = _firestore.collection(AppConstants.workersCollection);
-
-      if (_selectedCategory != 'All') {
-        query = query.where('skills', arrayContains: _selectedCategory);
-      }
-
-      final QuerySnapshot snapshot = await query.get();
+      final QuerySnapshot snapshot = await _firestore
+          .collection(AppConstants.workersCollection)
+          .get();
       
       List<Map<String, dynamic>> workers = [];
       
       for (var doc in snapshot.docs) {
         final worker = WorkerModel.fromFirestore(doc);
+
+        if (!_matchesSelectedCategory(worker)) {
+          continue;
+        }
         
         // Get user details
         final userDoc = await _firestore
@@ -115,6 +128,26 @@ class _WorkerListScreenState extends State<WorkerListScreen> {
         _isLoading = false;
       });
     }
+  }
+
+  bool _matchesSelectedCategory(WorkerModel worker) {
+    if (_selectedCategory == 'All') {
+      return true;
+    }
+
+    final selected = _selectedCategory.toLowerCase();
+    final keywords = <String>{
+      selected,
+      ...?_categoryKeywords[_selectedCategory]?.map((value) => value.toLowerCase()),
+    };
+
+    final haystack = <String>[
+      worker.skills.join(' '),
+      worker.bio,
+      worker.address ?? '',
+    ].join(' ').toLowerCase();
+
+    return keywords.any(haystack.contains);
   }
 
   @override

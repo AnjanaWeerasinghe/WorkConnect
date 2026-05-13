@@ -30,16 +30,20 @@ class AuthRepository {
               .get();
 
           if (userDoc.exists) {
+            // User document exists - return it without modification
+            print("Login successful: Loading existing user data");
             return UserModel.fromFirestore(userDoc);
           } else {
-            // User exists in Firebase Auth but not in Firestore
-            // Create a new user document with basic info
+            // User exists in Firebase Auth but not in Firestore (rare case)
+            // This should only happen for legacy users or if the document was deleted
+            print("User has no Firestore document, creating new one with default role");
+            
             UserModel userModel = UserModel(
               id: userCredential.user!.uid,
               name: userCredential.user!.displayName ?? 'Unknown User',
               email: email,
               phone: userCredential.user!.phoneNumber ?? '',
-              role: AppConstants.customerRole, // Default role
+              role: AppConstants.customerRole, // Default role for new users only
               createdAt: DateTime.now(),
               updatedAt: DateTime.now(),
             );
@@ -137,17 +141,30 @@ class AuthRepository {
         // Check if this is the current authenticated user
         User? currentFirebaseUser = _firebaseAuth.currentUser;
         if (currentFirebaseUser != null && currentFirebaseUser.uid == userId) {
+          // Double-check the document doesn't exist to avoid race conditions
+          DocumentSnapshot recheckDoc = await _firestore
+              .collection(AppConstants.usersCollection)
+              .doc(userId)
+              .get();
+          
+          if (recheckDoc.exists) {
+            // Document was created in the meantime, return it
+            return UserModel.fromFirestore(recheckDoc);
+          }
+          
           // Create user document for authenticated user who doesn't have Firestore doc
+          // ONLY if it truly doesn't exist
           UserModel userModel = UserModel(
             id: userId,
             name: currentFirebaseUser.displayName ?? 'Unknown User',
             email: currentFirebaseUser.email ?? '',
             phone: currentFirebaseUser.phoneNumber ?? '',
-            role: AppConstants.customerRole, // Default role
+            role: AppConstants.customerRole, // Default role ONLY for new users
             createdAt: DateTime.now(),
             updatedAt: DateTime.now(),
           );
 
+          // Use regular set (not merge) since we confirmed document doesn't exist
           await _firestore
               .collection(AppConstants.usersCollection)
               .doc(userId)

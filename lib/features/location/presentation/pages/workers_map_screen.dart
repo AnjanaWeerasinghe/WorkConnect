@@ -42,6 +42,19 @@ class _WorkersMapScreenState extends State<WorkersMapScreen> {
   String _selectedCategory = 'All';
   double _searchRadius = 10.0; // km
 
+  static const Map<String, List<String>> _categoryKeywords = {
+    'Plumber': ['plumber', 'plumbing'],
+    'Electrician': ['electrician', 'electrical', 'wiring'],
+    'Mechanic': ['mechanic', 'mechanical', 'auto', 'vehicle'],
+    'Technician': ['technician', 'technical', 'tech'],
+    'Carpenter': ['carpenter', 'carpentry', 'woodwork'],
+    'Painter': ['painter', 'painting'],
+    'Cleaner': ['cleaner', 'cleaning', 'housekeeping'],
+    'Gardener': ['gardener', 'gardening', 'landscaping'],
+    'AC Repair': ['ac repair', 'air conditioning', 'hvac'],
+    'Appliance Repair': ['appliance repair', 'appliance', 'repair'],
+  };
+
   StreamSubscription? _workersSubscription;
 
   @override
@@ -86,15 +99,10 @@ class _WorkersMapScreenState extends State<WorkersMapScreen> {
     });
 
     try {
-      Query query = _firestore
+      final snapshot = await _firestore
           .collection(AppConstants.workersCollection)
-          .where('isOnline', isEqualTo: true);
-
-      if (_selectedCategory != 'All') {
-        query = query.where('skills', arrayContains: _selectedCategory);
-      }
-
-      final snapshot = await query.get();
+          .where('isOnline', isEqualTo: true)
+          .get();
       
       List<Map<String, dynamic>> workers = [];
       Set<Marker> markers = {};
@@ -111,6 +119,10 @@ class _WorkersMapScreenState extends State<WorkersMapScreen> {
 
       for (var doc in snapshot.docs) {
         final worker = WorkerModel.fromFirestore(doc);
+
+        if (!_matchesSelectedCategory(worker)) {
+          continue;
+        }
         
         if (worker.location == null) continue;
 
@@ -191,6 +203,26 @@ class _WorkersMapScreenState extends State<WorkersMapScreen> {
         _isLoading = false;
       });
     }
+  }
+
+  bool _matchesSelectedCategory(WorkerModel worker) {
+    if (_selectedCategory == 'All') {
+      return true;
+    }
+
+    final selected = _selectedCategory.toLowerCase();
+    final keywords = <String>{
+      selected,
+      ...?_categoryKeywords[_selectedCategory]?.map((value) => value.toLowerCase()),
+    };
+
+    final haystack = <String>[
+      worker.skills.join(' '),
+      worker.bio,
+      worker.address ?? '',
+    ].join(' ').toLowerCase();
+
+    return keywords.any(haystack.contains);
   }
 
   void _onMapCreated(GoogleMapController controller) {
