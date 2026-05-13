@@ -89,10 +89,23 @@ class DatabaseInitializer {
   }
 
   /// Create a test user document (for development purposes)
+  /// This will NOT overwrite existing role if user document already exists
   static Future<void> createTestUser() async {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user != null) {
+        // Check if user document already exists
+        final existingDoc = await _firestore
+            .collection(AppConstants.usersCollection)
+            .doc(user.uid)
+            .get();
+        
+        if (existingDoc.exists) {
+          print('DatabaseInitializer: User document already exists, skipping to preserve role');
+          return;
+        }
+        
+        // Only create if document doesn't exist
         await _firestore
             .collection(AppConstants.usersCollection)
             .doc(user.uid)
@@ -103,9 +116,9 @@ class DatabaseInitializer {
           'role': AppConstants.customerRole,
           'createdAt': FieldValue.serverTimestamp(),
           'updatedAt': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
+        });
         
-        print('DatabaseInitializer: Test user created/updated: ${user.email}');
+        print('DatabaseInitializer: Test user created: ${user.email}');
       }
     } catch (e) {
       print('DatabaseInitializer: Error creating test user: $e');

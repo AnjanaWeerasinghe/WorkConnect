@@ -178,6 +178,127 @@ class _WorkerDashboardScreenState extends State<WorkerDashboardScreen> {
     }
   }
 
+  List<String> _parseSkills(String input) {
+    return input
+        .split(',')
+        .map((skill) => skill.trim())
+        .where((skill) => skill.isNotEmpty)
+        .toList();
+  }
+
+  Future<void> _saveProfileUpdates({
+    required String skillsInput,
+    required String bio,
+    required String address,
+    required String hourlyRateInput,
+  }) async {
+    if (_workerProfile == null) return;
+
+    final skills = _parseSkills(skillsInput);
+    final hourlyRate = double.tryParse(hourlyRateInput.trim());
+
+    if (skills.isEmpty) {
+      throw Exception('Please add at least one skill');
+    }
+
+    if (bio.trim().isEmpty) {
+      throw Exception('Please add a bio');
+    }
+
+    if (hourlyRate == null || hourlyRate < 0) {
+      throw Exception('Please enter a valid hourly rate');
+    }
+
+    final updatedWorker = _workerProfile!.copyWith(
+      skills: skills,
+      bio: bio.trim(),
+      address: address.trim().isEmpty ? null : address.trim(),
+      hourlyRate: hourlyRate,
+      updatedAt: DateTime.now(),
+    );
+
+    await _firestore
+        .collection(AppConstants.workersCollection)
+        .doc(_workerProfile!.id)
+        .set(updatedWorker.toFirestore(), SetOptions(merge: true));
+
+    if (!mounted) return;
+
+    setState(() {
+      _workerProfile = updatedWorker;
+    });
+  }
+
+  Widget _buildStatusChip(String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withOpacity(0.25)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProfileInfoTile({
+    required IconData icon,
+    required String label,
+    required String value,
+  }) {
+    final isWide = MediaQuery.of(context).size.width > 600;
+
+    return Container(
+      width: isWide ? (MediaQuery.of(context).size.width - 64) / 2 : double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.grey[200]!),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 20, color: Colors.orange),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: Colors.grey[600],
+                    fontSize: 12,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatDate(DateTime date) {
+    return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -216,13 +337,19 @@ class _WorkerDashboardScreenState extends State<WorkerDashboardScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Profile Card
+            // Profile Summary
             Card(
+              elevation: 2,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
               child: Padding(
                 padding: const EdgeInsets.all(20),
                 child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         CircleAvatar(
                           radius: 40,
@@ -239,37 +366,194 @@ class _WorkerDashboardScreenState extends State<WorkerDashboardScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      _userProfile!.name,
+                                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                  if (_workerProfile!.isVerified)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                      decoration: BoxDecoration(
+                                        color: Colors.blue[50],
+                                        borderRadius: BorderRadius.circular(20),
+                                        border: Border.all(color: Colors.blue[200]!),
+                                      ),
+                                      child: const Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.verified, size: 14, color: Colors.blue),
+                                          SizedBox(width: 4),
+                                          Text(
+                                            'Verified',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w600,
+                                              color: Colors.blue,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
                               Text(
-                                _userProfile!.name,
-                                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                                  fontWeight: FontWeight.bold,
+                                _userProfile!.email,
+                                style: TextStyle(
+                                  color: Colors.grey[600],
+                                  fontSize: 13,
                                 ),
                               ),
-                              const SizedBox(height: 4),
+                              const SizedBox(height: 8),
                               RatingDisplay(
                                 rating: _workerProfile!.avgRating,
                                 reviewCount: _workerProfile!.ratingCount,
                                 starSize: 18,
                               ),
-                              const SizedBox(height: 4),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: _isOnline ? Colors.green : Colors.grey,
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Text(
-                                  _isOnline ? 'Online' : 'Offline',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 12,
+                              const SizedBox(height: 8),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  _buildStatusChip(
+                                    _isOnline ? 'Online' : 'Offline',
+                                    _isOnline ? Colors.green : Colors.grey,
                                   ),
-                                ),
+                                  _buildStatusChip(
+                                    '${_workerProfile!.totalJobs} jobs',
+                                    Colors.orange,
+                                  ),
+                                  _buildStatusChip(
+                                    '\$${_workerProfile!.hourlyRate.toStringAsFixed(0)}/hr',
+                                    Colors.teal,
+                                  ),
+                                ],
                               ),
                             ],
                           ),
                         ),
                       ],
+                    ),
+                    const SizedBox(height: 20),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[50],
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.grey[200]!),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Profile Details',
+                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 12,
+                            children: [
+                              _buildProfileInfoTile(
+                                icon: Icons.phone_outlined,
+                                label: 'Phone',
+                                value: _userProfile!.phone.isNotEmpty
+                                    ? _userProfile!.phone
+                                    : 'Not set',
+                              ),
+                              _buildProfileInfoTile(
+                                icon: Icons.location_on_outlined,
+                                label: 'Service Area',
+                                value: _workerProfile!.address?.isNotEmpty == true
+                                    ? _workerProfile!.address!
+                                    : 'Not set',
+                              ),
+                              _buildProfileInfoTile(
+                                icon: Icons.map_outlined,
+                                label: 'Location',
+                                value: _workerProfile!.location != null
+                                    ? '${_workerProfile!.location!.latitude.toStringAsFixed(4)}, ${_workerProfile!.location!.longitude.toStringAsFixed(4)}'
+                                    : 'Not shared',
+                              ),
+                              _buildProfileInfoTile(
+                                icon: Icons.workspace_premium_outlined,
+                                label: 'Certifications',
+                                value: '${_workerProfile!.certificationImages.length}',
+                              ),
+                              _buildProfileInfoTile(
+                                icon: Icons.calendar_today_outlined,
+                                label: 'Joined',
+                                value: _formatDate(_userProfile!.createdAt),
+                              ),
+                              _buildProfileInfoTile(
+                                icon: Icons.update_outlined,
+                                label: 'Updated',
+                                value: _formatDate(_workerProfile!.updatedAt),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Skills',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    _workerProfile!.skills.isEmpty
+                        ? Text(
+                            'No skills added yet',
+                            style: TextStyle(color: Colors.grey[600]),
+                          )
+                        : Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: _workerProfile!.skills
+                                .map(
+                                  (skill) => Chip(
+                                    label: Text(skill),
+                                    backgroundColor: Colors.orange[100],
+                                  ),
+                                )
+                                .toList(),
+                          ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'About Me',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: Colors.grey[200]!),
+                      ),
+                      child: Text(
+                        _workerProfile!.bio.isEmpty
+                            ? 'No bio added yet'
+                            : _workerProfile!.bio,
+                        style: TextStyle(
+                          color: _workerProfile!.bio.isEmpty ? Colors.grey[600] : Colors.black87,
+                          height: 1.45,
+                        ),
+                      ),
                     ),
                     const SizedBox(height: 16),
                     Row(
@@ -479,9 +763,130 @@ class _WorkerDashboardScreenState extends State<WorkerDashboardScreen> {
   }
 
   void _showEditProfileDialog() {
-    // TODO: Implement edit profile dialog
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Profile editing feature coming soon!')),
+    if (_workerProfile == null) return;
+
+    final skillsController = TextEditingController(text: _workerProfile!.skills.join(', '));
+    final bioController = TextEditingController(text: _workerProfile!.bio);
+    final addressController = TextEditingController(text: _workerProfile!.address ?? '');
+    final hourlyRateController = TextEditingController(text: _workerProfile!.hourlyRate.toStringAsFixed(0));
+
+    bool isSaving = false;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            Future<void> saveChanges() async {
+              if (isSaving) return;
+
+              setDialogState(() {
+                isSaving = true;
+              });
+
+              try {
+                await _saveProfileUpdates(
+                  skillsInput: skillsController.text,
+                  bio: bioController.text,
+                  address: addressController.text,
+                  hourlyRateInput: hourlyRateController.text,
+                );
+
+                if (!mounted) return;
+
+                Navigator.of(dialogContext).pop();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Profile updated successfully'),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+              } catch (e) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(e.toString().replaceFirst('Exception: ', '')),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              } finally {
+                if (mounted) {
+                  setDialogState(() {
+                    isSaving = false;
+                  });
+                }
+              }
+            }
+
+            return AlertDialog(
+              title: const Text('Edit Profile'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: skillsController,
+                      decoration: const InputDecoration(
+                        labelText: 'Skills',
+                        hintText: 'Plumbing, Wiring, Repairs',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: bioController,
+                      decoration: const InputDecoration(
+                        labelText: 'Bio',
+                        hintText: 'Tell customers about your experience',
+                      ),
+                      maxLines: 4,
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: hourlyRateController,
+                      decoration: const InputDecoration(
+                        labelText: 'Hourly Rate',
+                        prefixText: '\$',
+                        hintText: '25',
+                      ),
+                      keyboardType: TextInputType.number,
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: addressController,
+                      decoration: const InputDecoration(
+                        labelText: 'Address / Service Area',
+                        hintText: 'City, neighborhood, or service area',
+                      ),
+                      maxLines: 2,
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isSaving ? null : () => Navigator.of(dialogContext).pop(),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: isSaving ? null : saveChanges,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.orange,
+                    foregroundColor: Colors.white,
+                  ),
+                  child: isSaving
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Text('Save'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 }

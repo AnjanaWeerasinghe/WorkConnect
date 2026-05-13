@@ -55,9 +55,8 @@ class _LoginScreenState extends State<LoginScreen> {
           _emailController.text.trim(),
           _passwordController.text,
         );
-        print('LoginScreen: Login successful - creating/updating user document');
-        // Ensure user document exists after login
-        await DatabaseInitializer.createTestUser();
+        print('LoginScreen: Login successful');
+        // User document is already created/loaded by signInWithEmail
       } else {
         // Registration mode
         if (_selectedRole == AppConstants.workerRole) {
@@ -77,8 +76,8 @@ class _LoginScreenState extends State<LoginScreen> {
             );
           }
         } else {
-          // Customer registration - direct registration
-          print('LoginScreen: Attempting customer registration for ${_emailController.text.trim()}');
+          // Customer or Admin registration - direct registration
+          print('LoginScreen: Attempting ${_selectedRole} registration for ${_emailController.text.trim()}');
           await authRepository.registerWithEmail(
             email: _emailController.text.trim(),
             password: _passwordController.text,
@@ -272,6 +271,10 @@ class _LoginScreenState extends State<LoginScreen> {
                       DropdownMenuItem(
                         value: AppConstants.workerRole,
                         child: Text('Worker'),
+                      ),
+                      DropdownMenuItem(
+                        value: AppConstants.adminRole,
+                        child: Text('Admin'),
                       ),
                     ],
                     onChanged: (value) {

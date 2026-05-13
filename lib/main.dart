@@ -19,8 +19,12 @@ Future<void> main() async {
   await FirebaseAuth.instance.signOut();
   print('User signed out on app start');
   
-  // Initialize database collections
-  await DatabaseInitializer.initializeDatabase();
+  // Initialize database collections in background (non-blocking)
+  DatabaseInitializer.initializeDatabase().then((_) {
+    print('Database initialization completed in background');
+  }).catchError((error) {
+    print('Database initialization error (non-critical): $error');
+  });
   
   runApp(const MyApp());
 }
