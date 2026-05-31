@@ -106,7 +106,7 @@ class _JobsMapScreenState extends State<JobsMapScreen> {
     });
 
     try {
-      // Query for jobs with 'requested' status (open jobs)
+        // Query for jobs with 'requested' status (open jobs)
       Query query = _firestore
           .collection(AppConstants.jobsCollection)
           .where('status', isEqualTo: AppConstants.jobStatusRequested);
@@ -225,37 +225,49 @@ class _JobsMapScreenState extends State<JobsMapScreen> {
     }
   }
 
-  Future<void> _acceptJob(JobModel job) async {
+  Future<void> _claimJob(JobModel job) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
     try {
-      await _firestore.collection(AppConstants.jobsCollection).doc(job.id).update({
-        'workerId': user.uid,
-        'status': AppConstants.jobStatusAccepted,
-        'acceptedAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
+      final jobRef = _firestore.collection(AppConstants.jobsCollection).doc(job.id);
+
+      await _firestore.runTransaction((transaction) async {
+        final freshSnap = await transaction.get(jobRef);
+        if (!freshSnap.exists) {
+          throw Exception('This job is no longer available.');
+        }
+
+        final freshJob = JobModel.fromFirestore(freshSnap);
+        if (freshJob.status != AppConstants.jobStatusRequested || freshJob.workerId != null) {
+          throw Exception('This job has already been claimed by another worker.');
+        }
+
+        transaction.update(jobRef, {
+          'workerId': user.uid,
+          'status': AppConstants.jobStatusAccepted,
+          'acceptedAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
       });
 
-      if (mounted) {
-        Navigator.pop(context); // Close bottom sheet
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Job accepted! The customer has been notified.'),
-            backgroundColor: Colors.green,
-          ),
-        );
-        _loadNearbyJobs(); // Refresh the list
-      }
+      if (!mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Job claimed successfully.'),
+          backgroundColor: Colors.green,
+        ),
+      );
+      _loadNearbyJobs();
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error accepting job: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not claim job: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
@@ -285,7 +297,7 @@ class _JobsMapScreenState extends State<JobsMapScreen> {
                     children: [
                       Expanded(
                         child: DropdownButtonFormField<String>(
-                          value: _selectedCategory,
+                          initialValue: _selectedCategory,
                           decoration: InputDecoration(
                             labelText: 'Job Type',
                             border: OutlineInputBorder(
@@ -825,13 +837,13 @@ class _JobsMapScreenState extends State<JobsMapScreen> {
                 const SizedBox(height: 24),
               ],
 
-              // Accept button
+              // Claim button
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
-                  onPressed: () => _acceptJob(job),
-                  icon: const Icon(Icons.check_circle),
-                  label: const Text('Accept This Job'),
+                  onPressed: () => _claimJob(job),
+                  icon: const Icon(Icons.assignment_turned_in),
+                  label: const Text('Claim This Job'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.green,
                     foregroundColor: Colors.white,

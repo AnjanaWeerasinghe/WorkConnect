@@ -11,10 +11,10 @@ class WorkerListScreen extends StatefulWidget {
   final bool emergencyOnly;
 
   const WorkerListScreen({
-    Key? key, 
+    super.key, 
     this.serviceFilter,
     this.emergencyOnly = false,
-  }) : super(key: key);
+  });
 
   @override
   State<WorkerListScreen> createState() => _WorkerListScreenState();
@@ -161,7 +161,7 @@ class _WorkerListScreenState extends State<WorkerListScreen> {
       body: Column(
         children: [
           // Category Filter
-          Container(
+          SizedBox(
             height: 50,
             child: ListView.builder(
               scrollDirection: Axis.horizontal,

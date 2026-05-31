@@ -6,7 +6,7 @@ import 'firebase_options.dart';
 import 'data/repositories/auth_repository.dart';
 import 'data/repositories/review_repository.dart';
 import 'features/authentication/presentation/pages/auth_wrapper.dart';
-import 'debug/debug_login_screen.dart'; // Add debug screen import
+// Add debug screen import
 import 'core/database/database_initializer.dart'; // Add database initializer
 
 Future<void> main() async {
