@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:async';
 import '../data/repositories/auth_repository.dart';
 import '../data/repositories/worker_registration_repository.dart';
 import '../data/models/user_model.dart';
@@ -11,7 +12,7 @@ import '../features/admin/presentation/pages/admin_panel_screen.dart';
 import '../core/constants/app_constants.dart';
 
 class HomePage extends StatefulWidget {
-  const HomePage({Key? key}) : super(key: key);
+  const HomePage({super.key});
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -20,6 +21,7 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final AuthRepository _authRepository = AuthRepository();
   final WorkerRegistrationRepository _workerRegRepo = WorkerRegistrationRepository();
+  StreamSubscription<User?>? _authSub;
   UserModel? _currentUser;
   bool _isLoading = true;
   bool _isWorkerPendingApproval = false;
@@ -27,23 +29,50 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    _authSub = FirebaseAuth.instance.authStateChanges().listen((user) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = true;
+        _currentUser = null;
+        _isWorkerPendingApproval = false;
+      });
+      _loadUserData();
+    });
     _loadUserData();
+  }
+
+  @override
+  void dispose() {
+    _authSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadUserData() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
       try {
+        _isWorkerPendingApproval = false;
         final userData = await _authRepository.getUserData(user.uid);
         
+        if (userData == null) {
+          // User data not found in Firestore, but user is authenticated
+          // This shouldn't happen in normal flow, show error
+          print('Warning: User authenticated but no profile found in Firestore');
+          setState(() {
+            _isLoading = false;
+          });
+          return;
+        }
+        
         // Check if user is a worker pending approval
-        if (userData?.role == AppConstants.workerRole) {
+        if (userData.role == AppConstants.workerRole) {
           final isApproved = await _authRepository.isWorkerApproved(user.uid);
           if (!isApproved) {
             // Check registration status
             final registration = await _workerRegRepo.getWorkerRegistrationByUserId(user.uid);
             if (registration != null && registration.status != WorkerApprovalStatus.approved) {
               setState(() {
+                _currentUser = userData;
                 _isWorkerPendingApproval = true;
                 _isLoading = false;
               });
@@ -58,26 +87,11 @@ class _HomePageState extends State<HomePage> {
         });
       } catch (e) {
         print('Error loading user data: $e');
-        // If we can't load user data, create a basic user model from Firebase Auth data
-        if (user.email != null) {
-          final basicUser = UserModel(
-            id: user.uid,
-            name: user.displayName ?? 'User',
-            email: user.email!,
-            phone: user.phoneNumber ?? '',
-            role: 'customer', // Default role
-            createdAt: DateTime.now(),
-            updatedAt: DateTime.now(),
-          );
-          setState(() {
-            _currentUser = basicUser;
-            _isLoading = false;
-          });
-        } else {
-          setState(() {
-            _isLoading = false;
-          });
-        }
+        // On error, still mark loading as complete but don't create a fallback user
+        // This ensures the "Please log in to continue" message is shown
+        setState(() {
+          _isLoading = false;
+        });
       }
     } else {
       setState(() {
@@ -121,11 +135,12 @@ class _HomePageState extends State<HomePage> {
     );
     }
 
-    // If no user data, show please login message
+    // If no user data, show error message
     if (_currentUser == null) {
+      final firebaseUser = FirebaseAuth.instance.currentUser;
       return Scaffold(
         appBar: AppBar(
-          title: Text('WorkConnect'),
+          title: const Text('WorkConnect'),
           backgroundColor: Colors.orange,
           foregroundColor: Colors.white,
           centerTitle: true,
@@ -135,27 +150,42 @@ class _HomePageState extends State<HomePage> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(
-                Icons.login,
+                Icons.error_outline,
                 size: 64,
                 color: Colors.grey[400],
               ),
-              SizedBox(height: 16),
+              const SizedBox(height: 16),
               Text(
-                'Please log in to continue',
+                firebaseUser != null 
+                    ? 'Failed to load profile'
+                    : 'Please log in to continue',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
                   color: Colors.grey[700],
                 ),
               ),
-              SizedBox(height: 8),
+              const SizedBox(height: 8),
               Text(
-                'Access your personalized workspace',
+                firebaseUser != null 
+                    ? 'Please try logging in again'
+                    : 'Access your personalized workspace',
                 style: TextStyle(
                   fontSize: 14,
                   color: Colors.grey[600],
                 ),
               ),
+              if (firebaseUser != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 24),
+                  child: ElevatedButton(
+                    onPressed: _loadUserData,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.orange,
+                    ),
+                    child: const Text('Retry'),
+                  ),
+                ),
             ],
           ),
         ),

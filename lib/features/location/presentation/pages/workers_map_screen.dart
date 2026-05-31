@@ -266,7 +266,7 @@ class _WorkersMapScreenState extends State<WorkersMapScreen> {
                     children: [
                       Expanded(
                         child: DropdownButtonFormField<String>(
-                          value: _selectedCategory,
+                          initialValue: _selectedCategory,
                           decoration: InputDecoration(
                             labelText: 'Service Type',
                             border: OutlineInputBorder(

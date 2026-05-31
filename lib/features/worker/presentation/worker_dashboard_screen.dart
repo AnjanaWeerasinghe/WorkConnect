@@ -8,7 +8,7 @@ import '../../../core/constants/app_constants.dart';
 import '../../../shared/widgets/star_rating_widget.dart';
 
 class WorkerDashboardScreen extends StatefulWidget {
-  const WorkerDashboardScreen({Key? key}) : super(key: key);
+  const WorkerDashboardScreen({super.key});
 
   @override
   State<WorkerDashboardScreen> createState() => _WorkerDashboardScreenState();

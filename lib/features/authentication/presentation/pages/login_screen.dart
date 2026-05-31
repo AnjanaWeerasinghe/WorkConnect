@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../../data/repositories/auth_repository.dart';
 import '../../../../core/constants/app_constants.dart';
-import '../../../../core/database/database_initializer.dart';
 import '../../../worker/presentation/pages/worker_registration_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -77,7 +76,7 @@ class _LoginScreenState extends State<LoginScreen> {
           }
         } else {
           // Customer or Admin registration - direct registration
-          print('LoginScreen: Attempting ${_selectedRole} registration for ${_emailController.text.trim()}');
+          print('LoginScreen: Attempting $_selectedRole registration for ${_emailController.text.trim()}');
           await authRepository.registerWithEmail(
             email: _emailController.text.trim(),
             password: _passwordController.text,

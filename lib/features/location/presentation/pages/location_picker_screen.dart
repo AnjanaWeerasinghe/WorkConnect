@@ -39,7 +39,7 @@ class LocationPickerScreen extends StatefulWidget {
     String title = 'Pick Location',
     bool enableSearch = true,
   }) async {
-    return Navigator.of(context).push<LocationModel>(
+    return Navigator.of(context, rootNavigator: true).push<LocationModel>(
       MaterialPageRoute(
         builder: (context) => LocationPickerScreen(
           initialLocation: initialLocation,

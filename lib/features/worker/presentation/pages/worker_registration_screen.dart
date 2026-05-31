@@ -234,7 +234,7 @@ class _WorkerRegistrationScreenState extends State<WorkerRegistrationScreen> {
 
               // Service Category
               DropdownButtonFormField<String>(
-                value: _selectedCategory,
+                initialValue: _selectedCategory,
                 decoration: InputDecoration(
                   labelText: 'Service Category',
                   prefixIcon: Icon(Icons.work_outline),
