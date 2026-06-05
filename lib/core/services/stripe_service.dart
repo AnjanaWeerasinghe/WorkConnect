@@ -11,9 +11,20 @@ class StripeService {
   static const String publishableKey =
       'pk_test_51TdOz9F7aCK9uZy21I3hQBEOQOMN9mwYYTsaE2E0O179BBr2eiktRvGXU3j3So55Wl5PNPbhShOfOkGoCpHzRN9E00dqv56iSV';
 
-  // Firebase Cloud Functions backend (deploy: firebase deploy --only functions)
-  static const String _baseUrl =
-      'https://us-central1-workconnect-02.cloudfunctions.net';
+  // ── Payment server URL ────────────────────────────────────────────────────
+  //
+  // DEBUG / local testing
+  //   Run:  cd stripe-server && node server.js
+  //   The local Express server listens on port 3000 and uses the Stripe
+  //   test key — no Firebase deployment or Blaze plan required.
+  //
+  // RELEASE / production
+  //   Deploy Cloud Functions:  firebase deploy --only functions
+  //   Requires Firebase Blaze plan (outbound network calls to Stripe).
+  //
+  static String get _baseUrl => kDebugMode
+      ? 'http://localhost:3000'
+      : 'https://us-central1-workconnect-02.cloudfunctions.net';
 
   static Future<void> initialize() async {
     Stripe.publishableKey = publishableKey;
@@ -24,6 +35,9 @@ class StripeService {
   /// Web  → custom card-input dialog (platform views unsupported on web).
   /// Mobile → native Stripe PaymentSheet.
   /// Returns true on success, false if cancelled.
+  ///
+  /// Throws a user-friendly [Exception] when the payment server is
+  /// unreachable (not deployed / CORS / Spark plan restriction).
   static Future<bool> processCardPayment({
     required double amount,
     required String jobId,
@@ -32,19 +46,41 @@ class StripeService {
   }) async {
     final amountInCents = (amount * 100).round();
 
-    final response = await http.post(
-      Uri.parse('$_baseUrl/createPaymentIntent'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'amount': amountInCents,
-        'currency': 'usd',
-        'jobId': jobId,
-        'customerId': customerId,
-      }),
-    );
+    late http.Response response;
+    try {
+      response = await http
+          .post(
+            Uri.parse('$_baseUrl/createPaymentIntent'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'amount':     amountInCents,
+              'currency':   'usd',
+              'jobId':      jobId,
+              'customerId': customerId,
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+    } catch (_) {
+      // Network error, CORS block, or timeout — server not reachable.
+      throw Exception(
+        'Card payment is unavailable right now.\n\n'
+        'This usually means the payment server has not been deployed yet. '
+        'Run  firebase deploy --only functions  and ensure your Firebase '
+        'project is on the Blaze plan (required for outbound API calls).\n\n'
+        'You can still complete this job using cash payment.',
+      );
+    }
 
     if (response.statusCode != 200) {
-      throw Exception('Payment server error: ${response.body}');
+      final body = response.body;
+      // Give a clear message for common server-side failures.
+      if (body.contains('BILLING_DISABLED') || response.statusCode == 403) {
+        throw Exception(
+          'Card payment requires the Firebase Blaze plan. '
+          'Please upgrade at console.firebase.google.com, or use cash payment.',
+        );
+      }
+      throw Exception('Payment server error (${response.statusCode}): $body');
     }
 
     final clientSecret =
