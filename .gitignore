@@ -47,3 +47,7 @@ app.*.map.json
 # Node modules
 node_modules/
 functions/node_modules/
+
+# Environment variables (never commit secrets)
+.env
+**/.env

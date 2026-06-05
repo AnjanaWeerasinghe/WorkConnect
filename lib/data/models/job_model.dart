@@ -12,6 +12,8 @@ class JobModel {
   final double? agreedPrice;
   final List<String> imageUrls;
   final bool hasReview;
+  final bool isPaid;
+  final String? paymentMethod; // 'card', 'cash', or null
   final DateTime createdAt;
   final DateTime? acceptedAt;
   final DateTime? completedAt;
@@ -29,6 +31,8 @@ class JobModel {
     this.agreedPrice,
     required this.imageUrls,
     required this.hasReview,
+    this.isPaid = false,
+    this.paymentMethod,
     required this.createdAt,
     this.acceptedAt,
     this.completedAt,
@@ -49,6 +53,8 @@ class JobModel {
       agreedPrice: data['agreedPrice']?.toDouble(),
       imageUrls: List<String>.from(data['imageUrls'] ?? []),
       hasReview: data['hasReview'] ?? false,
+      isPaid: data['isPaid'] ?? false,
+      paymentMethod: data['paymentMethod'] as String?,
       createdAt: (data['createdAt'] as Timestamp).toDate(),
       acceptedAt: data['acceptedAt'] != null ? (data['acceptedAt'] as Timestamp).toDate() : null,
       completedAt: data['completedAt'] != null ? (data['completedAt'] as Timestamp).toDate() : null,
@@ -68,6 +74,8 @@ class JobModel {
       'agreedPrice': agreedPrice,
       'imageUrls': imageUrls,
       'hasReview': hasReview,
+      'isPaid': isPaid,
+      'paymentMethod': paymentMethod,
       'createdAt': Timestamp.fromDate(createdAt),
       'acceptedAt': acceptedAt != null ? Timestamp.fromDate(acceptedAt!) : null,
       'completedAt': completedAt != null ? Timestamp.fromDate(completedAt!) : null,
@@ -87,6 +95,8 @@ class JobModel {
     double? agreedPrice,
     List<String>? imageUrls,
     bool? hasReview,
+    bool? isPaid,
+    String? paymentMethod,
     DateTime? createdAt,
     DateTime? acceptedAt,
     DateTime? completedAt,
@@ -104,6 +114,8 @@ class JobModel {
       agreedPrice: agreedPrice ?? this.agreedPrice,
       imageUrls: imageUrls ?? this.imageUrls,
       hasReview: hasReview ?? this.hasReview,
+      isPaid: isPaid ?? this.isPaid,
+      paymentMethod: paymentMethod ?? this.paymentMethod,
       createdAt: createdAt ?? this.createdAt,
       acceptedAt: acceptedAt ?? this.acceptedAt,
       completedAt: completedAt ?? this.completedAt,

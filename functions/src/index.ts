@@ -1,8 +1,93 @@
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
+import * as corsLib from "cors";
+import Stripe from "stripe";
 
 admin.initializeApp();
 const db = admin.firestore();
+
+// Allow requests from any origin (Flutter web dev server + deployed hosting)
+const cors = corsLib({ origin: true });
+
+const stripe = new Stripe(
+  process.env.STRIPE_SECRET_KEY!,
+  { apiVersion: "2023-10-16" }
+);
+
+// Helper: wrap an async handler with the cors middleware.
+function withCors(
+  handler: (req: functions.https.Request, res: functions.Response) => Promise<void>
+): functions.HttpsFunction {
+  return functions.https.onRequest((req, res) => {
+    cors(req, res, () => handler(req, res).catch((err) => {
+      console.error(err);
+      res.status(500).json({ error: (err as Error).message });
+    }));
+  });
+}
+
+// ── confirmPayment ──────────────────────────────────────────────────────────
+// Called by the Flutter web card dialog after creating a PaymentMethod.
+// Requires Firebase Blaze plan (outbound network calls).
+export const confirmPayment = withCors(async (req, res) => {
+  if (req.method !== "POST") {
+    res.status(405).json({ error: "Method not allowed" });
+    return;
+  }
+
+  const { clientSecret, paymentMethodId } = req.body as {
+    clientSecret: string;
+    paymentMethodId: string;
+  };
+
+  if (!clientSecret || !paymentMethodId) {
+    res.status(400).json({ error: "clientSecret and paymentMethodId are required" });
+    return;
+  }
+
+  const paymentIntentId = clientSecret.split("_secret_")[0];
+
+  const intent = await stripe.paymentIntents.confirm(paymentIntentId, {
+    payment_method: paymentMethodId,
+  });
+
+  res.status(200).json({
+    success: intent.status === "succeeded",
+    status:  intent.status,
+  });
+});
+
+// ── createPaymentIntent ─────────────────────────────────────────────────────
+// Creates a PaymentIntent and returns the clientSecret.
+// Requires Firebase Blaze plan (outbound network calls).
+// Deploy: firebase deploy --only functions
+export const createPaymentIntent = withCors(async (req, res) => {
+  if (req.method !== "POST") {
+    res.status(405).json({ error: "Method not allowed" });
+    return;
+  }
+
+  const { amount, currency = "usd", jobId, customerId } = req.body as {
+    amount: number;
+    currency?: string;
+    jobId: string;
+    customerId: string;
+  };
+
+  if (!amount || amount <= 0) {
+    res.status(400).json({ error: "Invalid amount" });
+    return;
+  }
+
+  const paymentIntent = await stripe.paymentIntents.create({
+    amount,
+    currency,
+    automatic_payment_methods: { enabled: true },
+    metadata: { jobId, customerId },
+  });
+
+  res.status(200).json({ clientSecret: paymentIntent.client_secret });
+});
 
 // Update worker rating when a review is created
 export const updateWorkerRating = functions.firestore
