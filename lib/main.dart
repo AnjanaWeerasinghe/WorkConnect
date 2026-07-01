@@ -11,22 +11,25 @@ import 'core/services/stripe_service.dart';
 import 'core/theme/app_theme.dart';
 
 Future<void> main() async {
+  // Ensure Flutter bindings are ready before Firebase and other services initialize.
   WidgetsFlutterBinding.ensureInitialized();
+  // Load Firebase config for the current platform before the app starts.
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
   try {
+    // Stripe is optional in some environments, so initialization failure is non-fatal.
     await StripeService.initialize();
   } catch (e) {
     // Stripe.js may not be available in all environments; non-fatal
     debugPrint('Stripe init warning: $e');
   }
 
-  // Always sign out user on app start to force login screen
+  // Force a fresh auth session on startup so the login flow is always explicit.
   await FirebaseAuth.instance.signOut();
   debugPrint('User signed out on app start');
 
-  // Initialize database collections in background (non-blocking)
+  // Seed required collections in the background so startup does not block.
   DatabaseInitializer.initializeDatabase().then((_) {
     debugPrint('Database initialization completed in background');
   }).catchError((error) {
@@ -43,6 +46,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
+        // Provide repositories once so screens can read them without manual wiring.
         Provider<AuthRepository>(create: (_) => AuthRepository()),
         Provider<ReviewRepository>(create: (_) => ReviewRepository()),
       ],

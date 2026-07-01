@@ -9,12 +9,13 @@ class AuthWrapper extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Listen to Firebase Auth so navigation updates automatically when the session changes.
     final authRepository = AuthRepository();
 
     return StreamBuilder<User?>(
       stream: authRepository.authStateChanges,
       builder: (context, snapshot) {
-        // Add timeout for loading state
+        // Show a loading state while Firebase is resolving the current session.
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
             body: Center(
@@ -30,17 +31,17 @@ class AuthWrapper extends StatelessWidget {
           );
         }
 
-        // Check for errors
+        // Fall back to the login screen if the auth stream errors out.
         if (snapshot.hasError) {
           return const LoginScreen(); // Fallback to login on error
         }
 
-        // User is signed in
+        // Signed-in users go straight to the home page.
         if (snapshot.hasData && snapshot.data != null) {
           return HomePage();
         }
 
-        // No user signed in
+        // No session means we stay on the authentication screen.
         return const LoginScreen();
       },
     );

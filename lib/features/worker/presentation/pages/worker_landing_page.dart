@@ -1,6 +1,9 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'dart:async';
+import 'package:image_picker/image_picker.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:geocoding/geocoding.dart';
@@ -13,7 +16,9 @@ import '../../../worker/presentation/worker_dashboard_screen.dart';
 import '../../../location/presentation/pages/jobs_map_screen.dart';
 import 'worker_notifications_page.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../data/models/bid_model.dart';
 import '../../../../shared/widgets/wc_components.dart';
+import '../../../../core/services/image_upload_service.dart';
 
 class WorkerLandingPage extends StatefulWidget {
   final UserModel user;
@@ -26,7 +31,7 @@ class WorkerLandingPage extends StatefulWidget {
 class _WorkerLandingPageState extends State<WorkerLandingPage> {
   final AuthRepository _authRepository = AuthRepository();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final Map<String, StreamSubscription<Position>> _locationSubscriptions = {};
+  final Map<String, Timer> _locationTimers = {};
 
   int _pendingJobs = 0;
   int _inProgressJobs = 0;
@@ -59,23 +64,25 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
 
   @override
   void dispose() {
-    for (final sub in _locationSubscriptions.values) { sub.cancel(); }
-    _locationSubscriptions.clear();
+    for (final t in _locationTimers.values) { t.cancel(); }
+    _locationTimers.clear();
     super.dispose();
   }
 
   Future<void> _loadWorkerStats() async {
     try {
+      // My pending bids (not yet accepted by any customer)
       final pendingSnap = await _firestore
-          .collection(AppConstants.jobsCollection)
+          .collection(AppConstants.bidsCollection)
           .where('workerId', isEqualTo: widget.user.id)
-          .where('status', whereIn: [AppConstants.jobStatusRequested, AppConstants.jobStatusAccepted])
+          .where('status', isEqualTo: AppConstants.bidStatusPending)
           .get();
 
+      // Active jobs: customer accepted my bid (accepted) + already on the way (in_progress)
       final inProgressSnap = await _firestore
           .collection(AppConstants.jobsCollection)
           .where('workerId', isEqualTo: widget.user.id)
-          .where('status', isEqualTo: AppConstants.jobStatusInProgress)
+          .where('status', whereIn: [AppConstants.jobStatusAccepted, AppConstants.jobStatusInProgress])
           .get();
 
       final completedSnap = await _firestore
@@ -336,20 +343,20 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
       childAspectRatio: 1.3,
       children: [
         WcStatCard(
-          label: 'Pending Jobs',
+          label: 'My Bids',
           value: '$_pendingJobs',
-          icon: Icons.pending_actions_rounded,
+          icon: Icons.gavel_rounded,
           accentColor: AppColors.primary,
-          subtitle: 'New requests',
-          badge: _pendingJobs > 0 ? WcStatusBadge(label: 'NEW', color: AppColors.error, filled: true) : null,
-          onTap: _showPendingJobsModal,
+          subtitle: 'Awaiting response',
+          badge: _pendingJobs > 0 ? WcStatusBadge(label: 'OPEN', color: AppColors.primary, filled: true) : null,
+          onTap: _showMyBidsModal,
         ),
         WcStatCard(
-          label: 'In Progress',
+          label: 'Active Jobs',
           value: '$_inProgressJobs',
           icon: Icons.directions_car_rounded,
           accentColor: AppColors.worker,
-          subtitle: 'Active jobs',
+          subtitle: 'Accepted + on the way',
           badge: _inProgressJobs > 0 ? WcStatusBadge(label: 'LIVE', color: AppColors.worker, filled: true) : null,
           onTap: _showInProgressJobsModal,
         ),
@@ -385,11 +392,11 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
     return Column(
       children: [
         WcActionRow(
-          title: 'View Job Requests',
-          subtitle: 'Check new job opportunities',
-          icon: Icons.work_outline_rounded,
+          title: 'My Bids',
+          subtitle: 'Track jobs you have bid on',
+          icon: Icons.gavel_rounded,
           iconColor: AppColors.primary,
-          onTap: _showPendingJobsModal,
+          onTap: _showMyBidsModal,
         ),
         const SizedBox(height: 10),
         WcActionRow(
@@ -437,9 +444,9 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
             ],
           ),
           const SizedBox(height: 14),
-          _buildTip(Icons.timer_outlined,        'Respond to job requests within 1 hour for better visibility'),
+          _buildTip(Icons.gavel_outlined,          'Place competitive bids quickly to win more jobs'),
           _buildTip(Icons.photo_camera_outlined,  'Upload photos of completed work to build trust'),
-          _buildTip(Icons.star_border_rounded,    'Maintain a 4.5+ rating to receive more job offers'),
+          _buildTip(Icons.star_border_rounded,    'Maintain a 4.5+ rating to win more bids'),
           _buildTip(Icons.event_available_outlined,'Keep your availability updated for relevant job matches'),
         ],
       ),
@@ -462,17 +469,30 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
     );
   }
 
-  // ── Modals (business logic fully preserved) ───────────────────────────────
+  // ── My Bids modal ─────────────────────────────────────────────────────────
 
-  Future<void> _showPendingJobsModal() async {
-    final snapshot = await _firestore
-        .collection(AppConstants.jobsCollection)
+  Future<void> _showMyBidsModal() async {
+    final bidsSnap = await _firestore
+        .collection(AppConstants.bidsCollection)
         .where('workerId', isEqualTo: widget.user.id)
-        .where('status', whereIn: [AppConstants.jobStatusRequested, AppConstants.jobStatusAccepted])
+        .where('status', isEqualTo: AppConstants.bidStatusPending)
         .orderBy('createdAt', descending: true)
         .get();
 
-    final jobs = snapshot.docs.map((doc) => JobModel.fromFirestore(doc)).toList();
+    final bids = bidsSnap.docs.map((doc) => BidModel.fromFirestore(doc)).toList();
+
+    // Load associated job for each bid
+    final List<Map<String, dynamic>> bidWithJobs = [];
+    for (final bid in bids) {
+      final jobDoc = await _firestore
+          .collection(AppConstants.jobsCollection)
+          .doc(bid.jobId)
+          .get();
+      if (jobDoc.exists) {
+        bidWithJobs.add({'bid': bid, 'job': JobModel.fromFirestore(jobDoc)});
+      }
+    }
+
     if (!mounted) return;
 
     await showModalBottomSheet(
@@ -487,28 +507,29 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
           builder: (modalCtx, setModalState) => Column(
             children: [
               _buildSheetHandle(),
-              _buildSheetHeader('Job Requests', jobs.length, AppColors.primary),
+              _buildSheetHeader('My Bids', bidWithJobs.length, AppColors.primary),
               Expanded(
-                child: jobs.isEmpty
+                child: bidWithJobs.isEmpty
                     ? const WcEmptyState(
-                        icon: Icons.work_off_outlined,
-                        title: 'No pending jobs',
-                        subtitle: 'New job requests will appear here.',
+                        icon: Icons.gavel_outlined,
+                        title: 'No pending bids',
+                        subtitle: 'Find jobs on the map and place your bid.',
                       )
                     : ListView.separated(
                         controller: scrollController,
                         padding: const EdgeInsets.all(16),
-                        itemCount: jobs.length,
-                        separatorBuilder: (_, index) => const SizedBox(height: 10),
+                        itemCount: bidWithJobs.length,
+                        separatorBuilder: (_, _) => const SizedBox(height: 10),
                         itemBuilder: (context, index) {
-                          final job = jobs[index];
-                          final jobId = job.id;
-                          return _buildPendingJobCard(
+                          final bid = bidWithJobs[index]['bid'] as BidModel;
+                          final job = bidWithJobs[index]['job'] as JobModel;
+                          return _buildBidCard(
                             context: context,
+                            bid: bid,
                             job: job,
-                            onStatusUpdate: (status) async {
-                              await _updateJobStatus(jobId, status, job);
-                              setModalState(() => jobs.removeWhere((j) => j.id == jobId));
+                            onWithdraw: () async {
+                              await _withdrawBid(bid.id);
+                              setModalState(() => bidWithJobs.removeAt(index));
                             },
                           );
                         },
@@ -521,21 +542,18 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
     );
   }
 
-  Widget _buildPendingJobCard({
+  Widget _buildBidCard({
     required BuildContext context,
+    required BidModel bid,
     required JobModel job,
-    required Future<void> Function(String) onStatusUpdate,
+    required VoidCallback onWithdraw,
   }) {
-    final isNew      = job.status == AppConstants.jobStatusRequested;
-    final isAccepted = job.status == AppConstants.jobStatusAccepted;
-
     return WcCard(
       padding: const EdgeInsets.all(16),
-      borderColor: isNew ? AppColors.primary : AppColors.worker,
+      borderColor: AppColors.primary,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Header ────────────────────────────────────────────────
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -552,333 +570,109 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
                   ],
                 ),
               ),
-              WcStatusBadge(
-                label: isNew ? 'New Request' : 'Accepted',
-                color: isNew ? AppColors.primary : AppColors.worker,
-              ),
+              WcStatusBadge(label: 'Bid Placed', color: AppColors.primary),
             ],
           ),
           const SizedBox(height: 10),
-
-          // ── Description ────────────────────────────────────────────
           Text(job.description,
-              style: const TextStyle(
-                  fontSize: 13, height: 1.5, color: AppColors.textSecondary),
+              style: const TextStyle(fontSize: 13, height: 1.5, color: AppColors.textSecondary),
               maxLines: 3, overflow: TextOverflow.ellipsis),
           const SizedBox(height: 10),
-
-          // ── Price row ──────────────────────────────────────────────
           Row(children: [
-            if (job.agreedPrice != null) ...[
-              GestureDetector(
-                onTap: () => _setJobPrice(context, job),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: AppColors.successLight,
-                    borderRadius: BorderRadius.circular(7),
-                    border: Border.all(color: AppColors.success.withValues(alpha: 0.5), width: 1.5),
-                    boxShadow: [BoxShadow(color: AppColors.success.withValues(alpha: 0.15), offset: const Offset(2, 2), blurRadius: 0)],
-                  ),
-                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    const Icon(Icons.attach_money_rounded, size: 14, color: AppColors.success),
-                    Text(job.agreedPrice!.toStringAsFixed(2),
-                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.success)),
-                    const SizedBox(width: 5),
-                    const Icon(Icons.edit_rounded, size: 12, color: AppColors.success),
-                  ]),
-                ),
-              ),
-            ] else if (isAccepted) ...[
-              // Accepted but no price — prompt to set one
-              GestureDetector(
-                onTap: () => _setJobPrice(context, job),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: AppColors.warningLight,
-                    borderRadius: BorderRadius.circular(7),
-                    border: Border.all(color: AppColors.warning, width: 1.5),
-                    boxShadow: [BoxShadow(color: AppColors.warning.withValues(alpha: 0.2), offset: const Offset(2, 2), blurRadius: 0)],
-                  ),
-                  child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(Icons.add_rounded, size: 14, color: AppColors.warning),
-                    SizedBox(width: 4),
-                    Text('Set Price', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.warning)),
-                  ]),
-                ),
-              ),
-            ] else if (isNew)
-              const Text('Price set when you accept',
-                  style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
-            const Spacer(),
-            Text(_formatDate(job.createdAt),
-                style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
-          ]),
-          const SizedBox(height: 12),
-
-          // ── Actions ────────────────────────────────────────────────
-          Wrap(spacing: 8, runSpacing: 8, children: [
-            // New request → "Accept + Set Price"
-            if (isNew)
-              _SmallButton(
-                label: 'Accept Job',
-                icon:  Icons.handshake_rounded,
-                color: AppColors.worker,
-                onTap: () => _showAcceptJobDialog(context, job, onStatusUpdate),
-              ),
-
-            // Accepted → "On the Way"
-            if (isAccepted)
-              _SmallButton(
-                label: 'On the Way',
-                icon:  Icons.navigation_rounded,
-                color: AppColors.info,
-                onTap: () => onStatusUpdate(AppConstants.jobStatusInProgress),
-              ),
-
-            _SmallButton(label: 'Navigate',
-                icon: Icons.directions_rounded, color: AppColors.info,
-                onTap: () => _navigateToJob(context, job)),
-
-            if (!isNew) // Can complete an accepted job
-              _SmallButton(label: 'Complete',
-                  icon: Icons.check_circle_rounded, color: AppColors.admin,
-                  onTap: () => _confirmAction(context, 'Complete Job',
-                      'Mark this job as completed?',
-                      () => onStatusUpdate(AppConstants.jobStatusCompleted))),
-
-            _SmallButton(label: 'Cancel',
-                icon: Icons.cancel_rounded, color: AppColors.error,
-                onTap: () => _confirmAction(context, 'Cancel Job',
-                    'Are you sure you want to cancel this job?',
-                    () => onStatusUpdate(AppConstants.jobStatusCancelled))),
-          ]),
-        ],
-      ),
-    );
-  }
-
-  /// Shows a price-entry dialog, then sets the job to accepted with the quoted price.
-  Future<void> _showAcceptJobDialog(
-    BuildContext context,
-    JobModel job,
-    Future<void> Function(String) onStatusUpdate,
-  ) async {
-    final priceCtrl  = TextEditingController();
-    // Capture before any await to avoid cross-async-gap BuildContext use.
-    final messenger  = ScaffoldMessenger.of(context);
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Accept Job'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Service: ${job.serviceType}',
-                style: const TextStyle(fontWeight: FontWeight.w700)),
-            const SizedBox(height: 4),
-            Text(job.address,
-                style: const TextStyle(
-                    fontSize: 13, color: AppColors.textSecondary),
-                maxLines: 2),
-            const SizedBox(height: 16),
-            const Text('Set your price for this job',
-                style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textPrimary)),
-            const SizedBox(height: 4),
-            const Text(
-                'The customer will be charged this amount upon completion.',
-                style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
-            const SizedBox(height: 10),
-            TextField(
-              controller: priceCtrl,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
-              autofocus: true,
-              decoration: const InputDecoration(
-                labelText: 'Your price',
-                prefixIcon: Icon(Icons.attach_money_rounded),
-                hintText: '0.00',
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          WcPrimaryButton(
-            label: 'Accept Job',
-            backgroundColor: AppColors.worker,
-            onPressed: () => Navigator.pop(ctx, true),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true) return;
-
-    final price = double.tryParse(priceCtrl.text.trim());
-
-    // Update job: set status to accepted and store the worker's quoted price
-    try {
-      final updates = <String, dynamic>{
-        'status':     AppConstants.jobStatusAccepted,
-        'workerId':   widget.user.id,
-        'acceptedAt': FieldValue.serverTimestamp(),
-        'updatedAt':  FieldValue.serverTimestamp(),
-        if (price != null && price > 0) 'agreedPrice': price,
-      };
-      await _firestore
-          .collection(AppConstants.jobsCollection)
-          .doc(job.id)
-          .update(updates);
-      await _loadWorkerStats();
-      messenger.showSnackBar(
-        const SnackBar(
-            content: Text('Job accepted'), backgroundColor: AppColors.worker),
-      );
-    } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(
-            content: Text('Failed to accept job: $e'),
-            backgroundColor: AppColors.error),
-      );
-    }
-  }
-
-  // ── Standalone price-set / price-edit ────────────────────────────────────
-  /// Opens a price dialog and writes `agreedPrice` to Firestore.
-  /// Works for any job status — does NOT change the status field.
-  Future<void> _setJobPrice(BuildContext context, JobModel job) async {
-    final priceCtrl = TextEditingController(
-      text: job.agreedPrice != null ? job.agreedPrice!.toStringAsFixed(2) : '',
-    );
-    final messenger = ScaffoldMessenger.of(context);
-
-    final isEdit     = job.agreedPrice != null;
-    final confirmed  = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Row(children: [
-          Container(
-            width: 34, height: 34,
-            decoration: BoxDecoration(
-              color: AppColors.successLight,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: AppColors.success.withValues(alpha: 0.3), width: 1.5),
-            ),
-            child: const Icon(Icons.attach_money_rounded, color: AppColors.success, size: 20),
-          ),
-          const SizedBox(width: 10),
-          Text(isEdit ? 'Edit Price' : 'Set Price'),
-        ]),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Job summary
             Container(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
               decoration: BoxDecoration(
-                color: AppColors.surfaceAlt,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AppColors.borderLight, width: 1.5),
+                color: AppColors.successLight,
+                borderRadius: BorderRadius.circular(7),
+                border: Border.all(color: AppColors.success.withValues(alpha: 0.5), width: 1.5),
               ),
-              child: Row(children: [
-                const Icon(Icons.work_outline_rounded, size: 16, color: AppColors.textSecondary),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(job.serviceType,
-                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
-                    Text(job.address,
-                        style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
-                        maxLines: 1, overflow: TextOverflow.ellipsis),
-                  ]),
-                ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.gavel_rounded, size: 14, color: AppColors.success),
+                const SizedBox(width: 5),
+                Text('Your Bid: \$${bid.amount.toStringAsFixed(2)}',
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.success)),
               ]),
             ),
-            const SizedBox(height: 16),
-            Text(
-              isEdit ? 'Update your quoted price:' : 'Enter your price for this job:',
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'The customer will see and pay this amount when the job is completed.',
-              style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: priceCtrl,
-              autofocus: true,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: InputDecoration(
-                labelText: 'Price',
-                prefixIcon: const Icon(Icons.attach_money_rounded),
-                hintText: '0.00',
-                suffixText: 'USD',
-                suffixStyle: TextStyle(
-                  color: AppColors.textSecondary,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 13,
-                ),
+            const Spacer(),
+            Text(_formatDate(bid.createdAt),
+                style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+          ]),
+          if (bid.message != null && bid.message!.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceAlt,
+                borderRadius: BorderRadius.circular(7),
+                border: Border.all(color: AppColors.borderLight),
               ),
+              child: Text(bid.message!,
+                  style: const TextStyle(
+                      fontSize: 12, color: AppColors.textSecondary, fontStyle: FontStyle.italic)),
             ),
           ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          WcPrimaryButton(
-            label: isEdit ? 'Update Price' : 'Set Price',
-            icon: Icons.check_rounded,
-            backgroundColor: AppColors.success,
-            onPressed: () => Navigator.pop(ctx, true),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          ),
+          const SizedBox(height: 12),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            _SmallButton(
+              label: 'Navigate',
+              icon: Icons.directions_rounded,
+              color: AppColors.info,
+              onTap: () => _navigateToJob(context, job),
+            ),
+            _SmallButton(
+              label: 'Withdraw Bid',
+              icon: Icons.cancel_rounded,
+              color: AppColors.error,
+              onTap: () => _confirmAction(
+                context,
+                'Withdraw Bid',
+                'Withdraw your bid of \$${bid.amount.toStringAsFixed(2)}?',
+                () async => onWithdraw(),
+              ),
+            ),
+          ]),
         ],
       ),
     );
+  }
 
-    if (confirmed != true) return;
-
-    final price = double.tryParse(priceCtrl.text.trim());
-    if (price == null || price <= 0) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Please enter a valid price greater than 0')),
-      );
-      return;
-    }
-
+  Future<void> _withdrawBid(String bidId) async {
     try {
       await _firestore
-          .collection(AppConstants.jobsCollection)
-          .doc(job.id)
-          .update({'agreedPrice': price, 'updatedAt': FieldValue.serverTimestamp()});
+          .collection(AppConstants.bidsCollection)
+          .doc(bidId)
+          .update({'status': AppConstants.bidStatusWithdrawn});
       await _loadWorkerStats();
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(isEdit ? 'Price updated to \$${price.toStringAsFixed(2)}' : 'Price set to \$${price.toStringAsFixed(2)}'),
-          backgroundColor: AppColors.success,
-        ),
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Bid withdrawn'), backgroundColor: AppColors.warning),
       );
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(content: Text('Failed to save price: $e'), backgroundColor: AppColors.error),
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to withdraw bid: $e'), backgroundColor: AppColors.error),
       );
     }
+  }
+
+  Future<void> _addJobImage(String jobId, List<String> currentUrls, {ImageSource source = ImageSource.gallery}) async {
+    final path = await ImageUploadService.pickAndSave(source: source);
+    if (path == null) return;
+    final updated = [...currentUrls, path];
+    await _firestore.collection(AppConstants.jobsCollection).doc(jobId).update({
+      'imageUrls': updated,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Future<void> _removeJobImage(String jobId, List<String> currentUrls, int index) async {
+    final path = currentUrls[index];
+    final updated = [...currentUrls]..removeAt(index);
+    await _firestore.collection(AppConstants.jobsCollection).doc(jobId).update({
+      'imageUrls': updated,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    await ImageUploadService.deleteLocal(path);
   }
 
   Future<void> _showInProgressJobsModal() async {
@@ -895,7 +689,10 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
           stream: _firestore
               .collection(AppConstants.jobsCollection)
               .where('workerId', isEqualTo: widget.user.id)
-              .where('status', isEqualTo: AppConstants.jobStatusInProgress)
+              .where('status', whereIn: [
+                AppConstants.jobStatusAccepted,
+                AppConstants.jobStatusInProgress,
+              ])
               .orderBy('createdAt', descending: true)
               .snapshots(),
           builder: (context, snapshot) {
@@ -905,26 +702,27 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
             return Column(
               children: [
                 _buildSheetHandle(),
-                _buildSheetHeader('In-Progress Jobs', jobs.length, AppColors.worker),
+                _buildSheetHeader('Active Jobs', jobs.length, AppColors.worker),
                 Expanded(
                   child: !snapshot.hasData
                       ? const Center(child: CircularProgressIndicator(color: AppColors.worker))
                       : jobs.isEmpty
                           ? const WcEmptyState(
                               icon: Icons.directions_car_outlined,
-                              title: 'No jobs in progress',
-                              subtitle: 'Accept a job request to start working.',
+                              title: 'No active jobs',
+                              subtitle: 'Place bids on the map — accepted jobs appear here.',
                             )
                           : ListView.separated(
                               controller: scrollController,
                               padding: const EdgeInsets.all(16),
                               itemCount: jobs.length,
-                              separatorBuilder: (_, index) => const SizedBox(height: 10),
+                              separatorBuilder: (_, _) => const SizedBox(height: 10),
                               itemBuilder: (context, index) {
                                 final job = jobs[index];
+                                final isBidWon = job.status == AppConstants.jobStatusAccepted;
                                 return WcCard(
                                   padding: const EdgeInsets.all(16),
-                                  borderColor: AppColors.worker,
+                                  borderColor: isBidWon ? AppColors.success : AppColors.worker,
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
@@ -935,76 +733,176 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
                                             child: Column(
                                               crossAxisAlignment: CrossAxisAlignment.start,
                                               children: [
-                                                Text(job.serviceType, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                                                Text(job.serviceType,
+                                                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
                                                 const SizedBox(height: 3),
-                                                Text(job.address, style: const TextStyle(fontSize: 13, color: AppColors.textSecondary), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                                Text(job.address,
+                                                    style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
+                                                    maxLines: 1, overflow: TextOverflow.ellipsis),
                                               ],
                                             ),
                                           ),
-                                          WcStatusBadge(label: 'Active', color: AppColors.worker),
+                                          WcStatusBadge(
+                                            label: isBidWon ? 'Bid Won!' : 'Active',
+                                            color: isBidWon ? AppColors.success : AppColors.worker,
+                                            filled: isBidWon,
+                                          ),
                                         ],
                                       ),
                                       const SizedBox(height: 10),
-                                      Text(job.description, style: const TextStyle(fontSize: 13, height: 1.5, color: AppColors.textSecondary), maxLines: 3, overflow: TextOverflow.ellipsis),
+                                      Text(job.description,
+                                          style: const TextStyle(
+                                              fontSize: 13, height: 1.5, color: AppColors.textSecondary),
+                                          maxLines: 3, overflow: TextOverflow.ellipsis),
                                       const SizedBox(height: 10),
-                                      // Price row with edit/set button
-                                      Row(
-                                        children: [
-                                          if (job.agreedPrice != null) ...[
-                                            GestureDetector(
-                                              onTap: () => _setJobPrice(context, job),
-                                              child: Container(
-                                                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-                                                decoration: BoxDecoration(
-                                                  color: AppColors.successLight,
-                                                  borderRadius: BorderRadius.circular(7),
-                                                  border: Border.all(color: AppColors.success.withValues(alpha: 0.5), width: 1.5),
-                                                  boxShadow: [BoxShadow(color: AppColors.success.withValues(alpha: 0.15), offset: const Offset(2, 2), blurRadius: 0)],
-                                                ),
-                                                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                                                  const Icon(Icons.attach_money_rounded, size: 14, color: AppColors.success),
-                                                  Text(job.agreedPrice!.toStringAsFixed(2),
-                                                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.success)),
-                                                  const SizedBox(width: 5),
-                                                  const Icon(Icons.edit_rounded, size: 12, color: AppColors.success),
-                                                ]),
-                                              ),
+                                      // Read-only agreed price (set when customer accepted the bid)
+                                      Row(children: [
+                                        if (job.agreedPrice != null)
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                                            decoration: BoxDecoration(
+                                              color: AppColors.successLight,
+                                              borderRadius: BorderRadius.circular(7),
+                                              border: Border.all(
+                                                  color: AppColors.success.withValues(alpha: 0.5), width: 1.5),
                                             ),
-                                          ] else ...[
-                                            GestureDetector(
-                                              onTap: () => _setJobPrice(context, job),
-                                              child: Container(
-                                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                                decoration: BoxDecoration(
-                                                  color: AppColors.warningLight,
-                                                  borderRadius: BorderRadius.circular(7),
-                                                  border: Border.all(color: AppColors.warning, width: 1.5),
-                                                  boxShadow: [BoxShadow(color: AppColors.warning.withValues(alpha: 0.2), offset: const Offset(2, 2), blurRadius: 0)],
+                                            child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                              const Icon(Icons.attach_money_rounded,
+                                                  size: 14, color: AppColors.success),
+                                              Text(job.agreedPrice!.toStringAsFixed(2),
+                                                  style: const TextStyle(
+                                                      fontSize: 13,
+                                                      fontWeight: FontWeight.w800,
+                                                      color: AppColors.success)),
+                                            ]),
+                                          ),
+                                        const Spacer(),
+                                        Text(_formatDate(job.createdAt),
+                                            style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                                      ]),
+                                      const SizedBox(height: 12),
+                                      // ── Job Photos ───────────────────────
+                                      Container(
+                                        padding: const EdgeInsets.all(10),
+                                        decoration: BoxDecoration(
+                                          color: AppColors.background,
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(color: AppColors.borderLight, width: 1),
+                                        ),
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Row(
+                                              children: [
+                                                const Icon(Icons.photo_library_outlined, size: 14, color: AppColors.textSecondary),
+                                                const SizedBox(width: 6),
+                                                const Text('Job Photos',
+                                                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+                                                const Spacer(),
+                                                GestureDetector(
+                                                  onTap: () => _addJobImage(job.id, job.imageUrls, source: ImageSource.camera),
+                                                  child: const Icon(Icons.camera_alt_outlined, size: 18, color: AppColors.worker),
                                                 ),
-                                                child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                                                  Icon(Icons.add_rounded, size: 14, color: AppColors.warning),
-                                                  SizedBox(width: 4),
-                                                  Text('Set Price', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.warning)),
-                                                ]),
-                                              ),
+                                                const SizedBox(width: 10),
+                                                GestureDetector(
+                                                  onTap: () => _addJobImage(job.id, job.imageUrls),
+                                                  child: const Icon(Icons.add_photo_alternate_outlined, size: 18, color: AppColors.worker),
+                                                ),
+                                              ],
                                             ),
+                                            if (job.imageUrls.isNotEmpty) ...[
+                                              const SizedBox(height: 8),
+                                              SizedBox(
+                                                height: 80,
+                                                child: ListView.separated(
+                                                  scrollDirection: Axis.horizontal,
+                                                  itemCount: job.imageUrls.length,
+                                                  separatorBuilder: (_, _) => const SizedBox(width: 6),
+                                                  itemBuilder: (_, i) {
+                                                    final path = job.imageUrls[i];
+                                                    return Stack(
+                                                      children: [
+                                                        ClipRRect(
+                                                          borderRadius: BorderRadius.circular(6),
+                                                          child: Image.file(
+                                                            File(path),
+                                                            width: 80,
+                                                            height: 80,
+                                                            fit: BoxFit.cover,
+                                                            errorBuilder: (_, _, _) => Container(
+                                                              width: 80, height: 80,
+                                                              decoration: BoxDecoration(
+                                                                color: AppColors.surfaceAlt,
+                                                                borderRadius: BorderRadius.circular(6),
+                                                              ),
+                                                              child: const Icon(Icons.broken_image_outlined, color: AppColors.textMuted),
+                                                            ),
+                                                          ),
+                                                        ),
+                                                        Positioned(
+                                                          top: 2, right: 2,
+                                                          child: GestureDetector(
+                                                            onTap: () => _removeJobImage(job.id, job.imageUrls, i),
+                                                            child: Container(
+                                                              padding: const EdgeInsets.all(2),
+                                                              decoration: const BoxDecoration(
+                                                                color: AppColors.error,
+                                                                shape: BoxShape.circle,
+                                                              ),
+                                                              child: const Icon(Icons.close, size: 10, color: Colors.white),
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    );
+                                                  },
+                                                ),
+                                              ),
+                                            ] else
+                                              Padding(
+                                                padding: const EdgeInsets.only(top: 6),
+                                                child: Text(
+                                                  'Tap the icons above to add photos',
+                                                  style: TextStyle(fontSize: 11, color: AppColors.textMuted),
+                                                ),
+                                              ),
                                           ],
-                                          const Spacer(),
-                                          Text(_formatDate(job.createdAt), style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
-                                        ],
+                                        ),
                                       ),
                                       const SizedBox(height: 12),
                                       Wrap(
                                         spacing: 8,
                                         runSpacing: 8,
                                         children: [
-                                          _SmallButton(label: 'Navigate', icon: Icons.directions_rounded, color: AppColors.info,
-                                              onTap: () => _navigateToJob(context, job)),
-                                          _SmallButton(label: 'Complete', icon: Icons.check_circle_rounded, color: AppColors.admin,
-                                              onTap: () => _confirmAction(context, 'Complete Job', 'Mark this job as completed? The customer will be prompted to pay.', () async {
-                                                await _updateJobStatus(job.id, AppConstants.jobStatusCompleted, job);
+                                          if (isBidWon)
+                                            _SmallButton(
+                                              label: 'On the Way',
+                                              icon: Icons.navigation_rounded,
+                                              color: AppColors.info,
+                                              onTap: () => _updateJobStatus(
+                                                  job.id, AppConstants.jobStatusInProgress, job),
+                                            ),
+                                          _SmallButton(
+                                            label: 'Navigate',
+                                            icon: Icons.directions_rounded,
+                                            color: AppColors.info,
+                                            onTap: () => _navigateToJob(context, job),
+                                          ),
+                                          _SmallButton(
+                                            label: 'Complete',
+                                            icon: Icons.check_circle_rounded,
+                                            color: AppColors.admin,
+                                            onTap: () => _confirmAction(
+                                              context,
+                                              'Complete Job',
+                                              'Mark this job as completed? The customer will be prompted to pay.',
+                                              () async {
+                                                await _updateJobStatus(
+                                                    job.id, AppConstants.jobStatusCompleted, job);
                                                 if (modalContext.mounted) Navigator.pop(modalContext);
-                                              })),
+                                              },
+                                            ),
+                                          ),
                                         ],
                                       ),
                                     ],
@@ -1349,47 +1247,50 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
     }
   }
 
+  Future<void> _pushLocationForJob(String jobId) async {
+    try {
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.best),
+      );
+      await _firestore.collection(AppConstants.jobsCollection).doc(jobId).update({
+        'workerLocation': GeoPoint(pos.latitude, pos.longitude),
+        'workerLocationUpdatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      debugPrint('Error writing location for job $jobId: $e');
+    }
+  }
+
   Future<void> _startLocationStream(String jobId) async {
     try {
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
       }
-      if (permission == LocationPermission.deniedForever || permission == LocationPermission.denied) {
+      if (permission == LocationPermission.deniedForever ||
+          permission == LocationPermission.denied) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Location permission required')),
         );
         return;
       }
-      if (_locationSubscriptions.containsKey(jobId)) return;
+      if (_locationTimers.containsKey(jobId)) return;
 
-      final stream = Geolocator.getPositionStream(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.best, distanceFilter: 10),
-      ).listen((pos) async {
-        try {
-          await _firestore.collection(AppConstants.jobsCollection).doc(jobId).update({
-            'workerLocation': GeoPoint(pos.latitude, pos.longitude),
-            'workerLocationUpdatedAt': FieldValue.serverTimestamp(),
-          });
-        } catch (e) {
-          debugPrint('Error writing location for job $jobId: $e');
-        }
-      });
-
-      _locationSubscriptions[jobId] = stream;
+      // Push immediately, then every 5 seconds
+      await _pushLocationForJob(jobId);
+      _locationTimers[jobId] = Timer.periodic(
+        const Duration(seconds: 5),
+        (_) => _pushLocationForJob(jobId),
+      );
     } catch (e) {
-      debugPrint('Error starting location stream: $e');
+      debugPrint('Error starting location timer: $e');
     }
   }
 
   void _stopLocationStream(String jobId) {
-    try {
-      _locationSubscriptions[jobId]?.cancel();
-      _locationSubscriptions.remove(jobId);
-    } catch (e) {
-      debugPrint('Error stopping location stream: $e');
-    }
+    _locationTimers[jobId]?.cancel();
+    _locationTimers.remove(jobId);
   }
 
   Future<void> _navigateToJob(BuildContext context, JobModel job) async {

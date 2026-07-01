@@ -5,6 +5,7 @@ import '../../../../data/repositories/worker_registration_repository.dart';
 import '../../../../data/repositories/auth_repository.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../shared/widgets/wc_components.dart';
+import '../../../location/presentation/pages/location_picker_screen.dart';
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Service category metadata (icon + accent color)
@@ -177,7 +178,7 @@ class _WorkerRegistrationScreenState extends State<WorkerRegistrationScreen>
             ),
             const SizedBox(height: 14),
             WcNotice(
-              message: 'You will be able to sign in once an admin approves your application. This typically takes 1â€“2 business days.',
+              message: 'You will be able to sign in once an admin approves your application. This typically takes 1–2 business days.',
               color: AppColors.warning,
               icon: Icons.schedule_rounded,
             ),
@@ -284,16 +285,55 @@ class _WorkerRegistrationScreenState extends State<WorkerRegistrationScreen>
           const SizedBox(height: 14),
 
           // Work area
-          TextFormField(
-            controller: _addressController,
-            maxLines: 2,
-            decoration: const InputDecoration(
-              labelText: 'Service Area / Address',
-              prefixIcon: Icon(Icons.location_on_outlined),
-              hintText: 'City or neighbourhood where you work',
-              alignLabelWithHint: true,
-            ),
-            validator: (v) => (v == null || v.trim().isEmpty) ? 'Please enter your service area' : null,
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: TextFormField(
+                  controller: _addressController,
+                  maxLines: 2,
+                  decoration: const InputDecoration(
+                    labelText: 'Service Area / Address',
+                    prefixIcon: Icon(Icons.location_on_outlined),
+                    hintText: 'City or neighbourhood where you work',
+                    alignLabelWithHint: true,
+                  ),
+                  validator: (v) => (v == null || v.trim().isEmpty) ? 'Please enter your service area' : null,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Tooltip(
+                  message: 'Pick from map',
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(10),
+                    onTap: () async {
+                      final loc = await LocationPickerScreen.pickLocation(
+                        context,
+                        title: 'Pick Your Service Area',
+                      );
+                      if (loc != null) {
+                        final text = loc.formattedAddress;
+                        if (text != 'Unknown location') {
+                          _addressController.text = text;
+                        }
+                      }
+                    },
+                    child: Container(
+                      width: 48,
+                      height: 56,
+                      decoration: BoxDecoration(
+                        color: AppColors.primaryLight,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: AppColors.primary.withValues(alpha: 0.4), width: 1.5),
+                      ),
+                      child: const Icon(Icons.map_rounded, color: AppColors.primary, size: 22),
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -496,7 +536,7 @@ class _WorkerRegistrationScreenState extends State<WorkerRegistrationScreen>
         const SizedBox(height: 20),
 
         WcNotice(
-          message: 'By submitting, you agree to our platform terms. An admin will review your application within 1â€“2 business days.',
+          message: 'By submitting, you agree to our platform terms. An admin will review your application within 1–2 business days.',
           color: AppColors.warning,
           icon: Icons.gavel_rounded,
         ),

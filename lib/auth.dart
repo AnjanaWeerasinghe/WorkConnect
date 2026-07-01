@@ -7,6 +7,7 @@ class AuthService {
   // Sign in with email and password
   Future<User?> signInWithEmail(String email, String password) async {
     try {
+      // Firebase Auth handles the credential check and returns the signed-in user.
       UserCredential userCredential = await _auth.signInWithEmailAndPassword(
         email: email,
         password: password,
@@ -21,6 +22,7 @@ class AuthService {
   // Register with email and password
   Future<User?> registerWithEmail(String email, String password) async {
     try {
+      // Create the account in Firebase Auth before any app-specific user profile is saved.
       UserCredential userCredential = await _auth.createUserWithEmailAndPassword(
         email: email,
         password: password,

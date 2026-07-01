@@ -37,6 +37,7 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _submit() async {
     debugPrint('LoginScreen: Submit called, isLoginMode: $_isLoginMode');
 
+    // Stop here until the current form values pass validation.
     if (!_formKey.currentState!.validate()) {
       debugPrint('LoginScreen: Form validation failed');
       return;
@@ -47,8 +48,10 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
 
     try {
+      // Keep API and Firebase logic out of the widget tree by using the repository.
       final authRepository = context.read<AuthRepository>();
 
+      // Login uses Firebase Auth sign-in; registration collects the extra profile fields.
       if (_isLoginMode) {
         debugPrint('LoginScreen: Attempting login for ${_emailController.text.trim()}');
         await authRepository.signInWithEmail(
@@ -57,6 +60,7 @@ class _LoginScreenState extends State<LoginScreen> {
         );
         debugPrint('LoginScreen: Login successful');
       } else {
+        // Workers go through a separate screen because they need extra onboarding data.
         if (_selectedRole == AppConstants.workerRole) {
           debugPrint('LoginScreen: Redirecting to worker registration form');
           if (mounted) {
@@ -73,6 +77,7 @@ class _LoginScreenState extends State<LoginScreen> {
             );
           }
         } else {
+          // Create the Firebase Auth account and store the profile in Firestore.
           debugPrint('LoginScreen: Attempting $_selectedRole registration for ${_emailController.text.trim()}');
           await authRepository.registerWithEmail(
             email: _emailController.text.trim(),
@@ -157,6 +162,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   keyboardType: TextInputType.emailAddress,
                   textInputAction: TextInputAction.next,
                   autocorrect: false,
+                    // Email validation prevents malformed addresses before the request is sent.
                   validator: (v) {
                     if (v == null || v.isEmpty) return 'Please enter your email';
                     if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(v)) {
@@ -253,6 +259,7 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         ),
       ),
+      // Password validation keeps weak or empty passwords from being submitted.
       validator: (v) {
         if (v == null || v.isEmpty) return 'Please enter your password';
         if (v.length < 6) return 'Password must be at least 6 characters';

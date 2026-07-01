@@ -1,16 +1,18 @@
 import 'dart:io';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:uuid/uuid.dart';
 
-/// Lightweight helper for picking and uploading images to Firebase Storage.
+/// Saves picked images to the device's local documents directory.
+/// Returns local file paths (not Firebase URLs).
 class ImageUploadService {
-  static final _storage = FirebaseStorage.instance;
-  static final _picker  = ImagePicker();
+  static final _picker = ImagePicker();
+  static const _uuid = Uuid();
 
   // ── Pick images ────────────────────────────────────────────────────────────
 
-  /// Pick a single image from the gallery.
+  /// Pick a single image from gallery or camera.
   static Future<XFile?> pickSingle({ImageSource source = ImageSource.gallery}) =>
       _picker.pickImage(source: source, imageQuality: 80);
 
@@ -20,40 +22,50 @@ class ImageUploadService {
     return files;
   }
 
-  // ── Upload helpers ─────────────────────────────────────────────────────────
+  // ── Save helpers ───────────────────────────────────────────────────────────
 
-  /// Upload a single [XFile] to [storagePath] and return the download URL.
-  static Future<String> uploadXFile(XFile file, String storagePath) async {
-    final ref = _storage.ref(storagePath);
+  /// Copy an [XFile] into the app's local images folder and return the saved path.
+  static Future<String> saveXFile(XFile file) async {
+    final dir = await _localImagesDir();
+    final ext = file.path.endsWith('.png') ? '.png' : '.jpg';
+    final dest = File('${dir.path}/${_uuid.v4()}$ext');
     if (kIsWeb) {
       final bytes = await file.readAsBytes();
-      await ref.putData(bytes, SettableMetadata(contentType: 'image/jpeg'));
+      await dest.writeAsBytes(bytes);
     } else {
-      await ref.putFile(File(file.path));
+      await File(file.path).copy(dest.path);
     }
-    return ref.getDownloadURL();
+    return dest.path;
   }
 
-  /// Upload multiple images to `basePath/{index}.jpg` and return their URLs.
-  static Future<List<String>> uploadMultiple(
-    List<XFile> files,
-    String basePath,
-  ) async {
-    final urls = <String>[];
-    for (int i = 0; i < files.length; i++) {
-      final url = await uploadXFile(files[i], '$basePath/$i.jpg');
-      urls.add(url);
+  /// Save multiple images and return their local paths.
+  static Future<List<String>> saveMultiple(List<XFile> files) async {
+    final paths = <String>[];
+    for (final f in files) {
+      paths.add(await saveXFile(f));
     }
-    return urls;
+    return paths;
   }
 
-  /// Pick and immediately upload a single image. Returns download URL or null.
-  static Future<String?> pickAndUpload({
-    required String storagePath,
-    ImageSource source = ImageSource.gallery,
-  }) async {
+  /// Pick a single image and immediately save it locally. Returns path or null.
+  static Future<String?> pickAndSave({ImageSource source = ImageSource.gallery}) async {
     final file = await pickSingle(source: source);
     if (file == null) return null;
-    return uploadXFile(file, storagePath);
+    return saveXFile(file);
+  }
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+
+  static Future<Directory> _localImagesDir() async {
+    final base = await getApplicationDocumentsDirectory();
+    final dir = Directory('${base.path}/workconnect_images');
+    if (!await dir.exists()) await dir.create(recursive: true);
+    return dir;
+  }
+
+  /// Delete a previously saved local image.
+  static Future<void> deleteLocal(String path) async {
+    final f = File(path);
+    if (await f.exists()) await f.delete();
   }
 }

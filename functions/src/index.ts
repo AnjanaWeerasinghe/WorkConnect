@@ -1,6 +1,6 @@
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
-import * as corsLib from "cors";
+import corsLib from "cors";
 import Stripe from "stripe";
 
 admin.initializeApp();

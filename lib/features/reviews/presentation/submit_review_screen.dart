@@ -113,16 +113,16 @@ class _SubmitReviewScreenState extends State<SubmitReviewScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          widget.worker.skills.isNotEmpty
-                              ? widget.worker.skills.first
-                              : 'Service Worker',
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.textPrimary),
+                          widget.worker.skills.join(' · '),
+                          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.textPrimary),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          widget.worker.skills.join(', '),
+                          widget.worker.bio.isNotEmpty ? widget.worker.bio : 'Verified worker',
                           style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
-                          maxLines: 1,
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
                         const SizedBox(height: 4),

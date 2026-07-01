@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../data/models/job_model.dart';
+import '../../../../data/models/worker_model.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../shared/widgets/wc_components.dart';
+import '../../../reviews/presentation/submit_review_screen.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Scope enum (unchanged — keeps all existing call sites working)
@@ -32,6 +34,39 @@ class CustomerJobsListPage extends StatefulWidget {
 class _CustomerJobsListPageState extends State<CustomerJobsListPage> {
   // Active secondary filter (within the parent scope)
   _JobFilter _filter = _JobFilter.all;
+
+  // ── Leave a review ────────────────────────────────────────────────────────
+  Future<void> _leaveReview(BuildContext context, JobModel job) async {
+    if (job.workerId == null) return;
+    try {
+      final workerDoc = await FirebaseFirestore.instance
+          .collection(AppConstants.workersCollection)
+          .doc(job.workerId)
+          .get();
+      if (!context.mounted) return;
+      if (!workerDoc.exists) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Worker not found')),
+        );
+        return;
+      }
+      final worker = WorkerModel.fromFirestore(workerDoc);
+      final result = await Navigator.of(context).push<bool?>(
+        MaterialPageRoute(builder: (_) => SubmitReviewScreen(job: job, worker: worker)),
+      );
+      if (!context.mounted) return;
+      if (result == true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Thank you for your review!'), backgroundColor: AppColors.success),
+        );
+      }
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e'), backgroundColor: AppColors.error),
+      );
+    }
+  }
 
   // ── Cancel a job ──────────────────────────────────────────────────────────
   Future<void> _cancelJob(BuildContext context, String jobId) async {
@@ -175,6 +210,7 @@ class _CustomerJobsListPageState extends State<CustomerJobsListPage> {
                                 child: _JobCard(
                                   job: job,
                                   onCancel: () => _cancelJob(context, job.id),
+                                  onLeaveReview: () => _leaveReview(context, job),
                                 ),
                               )),
                               const SizedBox(height: 4),
@@ -464,8 +500,9 @@ class _DateGroup {
 class _JobCard extends StatelessWidget {
   final JobModel     job;
   final VoidCallback onCancel;
+  final VoidCallback onLeaveReview;
 
-  const _JobCard({required this.job, required this.onCancel});
+  const _JobCard({required this.job, required this.onCancel, required this.onLeaveReview});
 
   @override
   Widget build(BuildContext context) {
@@ -612,6 +649,25 @@ class _JobCard extends StatelessWidget {
                 ),
               ),
             ],
+
+            // ── Leave Review (completed, not yet reviewed) ────────────
+            if (isCompleted && !job.hasReview && job.workerId != null) ...[
+              const SizedBox(height: 12),
+              Container(height: 1, color: AppColors.borderLight),
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerRight,
+                child: GestureDetector(
+                  onTap: onLeaveReview,
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    const Icon(Icons.rate_review_outlined, size: 14, color: AppColors.admin),
+                    const SizedBox(width: 5),
+                    Text('Leave Review',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.admin)),
+                  ]),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -631,8 +687,8 @@ class _JobCard extends StatelessWidget {
 
   String _statusLabel(String s) {
     switch (s) {
-      case AppConstants.jobStatusRequested:   return 'Waiting';
-      case AppConstants.jobStatusAccepted:    return 'Accepted';
+      case AppConstants.jobStatusRequested:   return 'Open for Bids';
+      case AppConstants.jobStatusAccepted:    return 'Worker Picked';
       case AppConstants.jobStatusInProgress:  return 'In Progress';
       case AppConstants.jobStatusCompleted:   return 'Completed';
       case AppConstants.jobStatusCancelled:   return 'Cancelled';
@@ -656,10 +712,10 @@ class _JobProgressStepper extends StatelessWidget {
   final String status;
 
   static const _steps = [
-    ('Requested',  Icons.send_rounded,           AppConstants.jobStatusRequested),
-    ('Accepted',   Icons.check_circle_outline_rounded, AppConstants.jobStatusAccepted),
-    ('On the Way', Icons.directions_car_rounded,  AppConstants.jobStatusInProgress),
-    ('Done',       Icons.verified_rounded,        AppConstants.jobStatusCompleted),
+    ('Bids Open',     Icons.gavel_rounded,              AppConstants.jobStatusRequested),
+    ('Worker Picked', Icons.check_circle_outline_rounded, AppConstants.jobStatusAccepted),
+    ('On the Way',    Icons.directions_car_rounded,     AppConstants.jobStatusInProgress),
+    ('Done',          Icons.verified_rounded,           AppConstants.jobStatusCompleted),
   ];
 
   static const _stepColors = [AppColors.primary, AppColors.success, AppColors.info, AppColors.admin];

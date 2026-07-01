@@ -16,6 +16,7 @@ import '../../../reviews/presentation/submit_review_screen.dart';
 import 'customer_jobs_list_page.dart';
 import 'create_job_screen.dart';
 import '../../../../data/models/worker_model.dart';
+import '../../../../data/models/bid_model.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../shared/widgets/wc_components.dart';
 
@@ -757,8 +758,21 @@ class _CustomerLandingPageState extends State<CustomerLandingPage> {
                   style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.primary),
                 ),
               const Spacer(),
+              if (job.status == AppConstants.jobStatusRequested)
+                TextButton.icon(
+                  onPressed: () => _showBidsModal(job),
+                  icon: const Icon(Icons.gavel_rounded, size: 16),
+                  label: const Text('View Bids', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.primary,
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
               if (job.status != AppConstants.jobStatusCompleted &&
-                  job.status != AppConstants.jobStatusCancelled)
+                  job.status != AppConstants.jobStatusCancelled) ...[
+                const SizedBox(width: 8),
                 TextButton.icon(
                   onPressed: () async {
                     final ok = await showDialog<bool>(
@@ -781,6 +795,8 @@ class _CustomerLandingPageState extends State<CustomerLandingPage> {
                   label: const Text('Cancel', style: TextStyle(color: AppColors.error, fontSize: 13)),
                   style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
                 ),
+              ],
+              const SizedBox(width: 8),
               Text(
                 _formatJobTime(job.createdAt),
                 style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
@@ -833,7 +849,24 @@ class _CustomerLandingPageState extends State<CustomerLandingPage> {
                 style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
               ),
               const SizedBox(height: 16),
-              ...historyJobs.take(3).map((job) => _buildHistoryJobCard(job)),
+              ...historyJobs.take(5).map((job) => _buildHistoryJobCard(job)),
+              if (historyJobs.length > 5) ...[
+                const SizedBox(height: 4),
+                WcOutlinedButton(
+                  label: 'View All ${historyJobs.length} Completed Jobs',
+                  icon: Icons.history_rounded,
+                  width: double.infinity,
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => CustomerJobsListPage(
+                        title: 'Completed Jobs',
+                        customerId: widget.user.id,
+                        scope: CustomerJobsScope.completed,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         );
@@ -942,6 +975,235 @@ class _CustomerLandingPageState extends State<CustomerLandingPage> {
     );
   }
 
+  // ── Bids Modal ────────────────────────────────────────────────────────
+  Future<void> _showBidsModal(JobModel job) async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.65,
+        minChildSize: 0.4,
+        maxChildSize: 0.92,
+        builder: (_, controller) => Container(
+          decoration: const BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            children: [
+              const SizedBox(height: 12),
+              Center(
+                child: Container(
+                  width: 36, height: 4,
+                  decoration: BoxDecoration(color: AppColors.borderLight, borderRadius: BorderRadius.circular(2)),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Row(
+                  children: [
+                    const Icon(Icons.gavel_rounded, color: AppColors.primary, size: 22),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Worker Bids', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+                          Text(job.serviceType, style: const TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(height: 1, color: AppColors.borderLight),
+              Expanded(
+                child: StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection(AppConstants.bidsCollection)
+                      .where('jobId', isEqualTo: job.id)
+                      .where('status', isEqualTo: AppConstants.bidStatusPending)
+                      .snapshots(),
+                  builder: (context, snap) {
+                    if (snap.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    final bids = snap.data?.docs.map((d) => BidModel.fromFirestore(d)).toList() ?? [];
+                    bids.sort((a, b) => a.amount.compareTo(b.amount));
+                    if (bids.isEmpty) {
+                      return const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(32),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.hourglass_empty_rounded, size: 48, color: AppColors.textMuted),
+                              SizedBox(height: 12),
+                              Text('No bids yet', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+                              SizedBox(height: 6),
+                              Text('Workers nearby will place bids soon.', style: TextStyle(fontSize: 13, color: AppColors.textMuted), textAlign: TextAlign.center),
+                            ],
+                          ),
+                        ),
+                      );
+                    }
+                    return ListView.separated(
+                      controller: controller,
+                      padding: const EdgeInsets.all(16),
+                      itemCount: bids.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 10),
+                      itemBuilder: (_, i) => _buildBidCard(bids[i], job, () {
+                        Navigator.pop(ctx);
+                        _acceptBid(job, bids[i]);
+                      }),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBidCard(BidModel bid, JobModel job, VoidCallback onAccept) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.background,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border, width: 1.5),
+        boxShadow: const [BoxShadow(color: Color(0x0A000000), blurRadius: 4, offset: Offset(0, 2))],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 40, height: 40,
+                decoration: BoxDecoration(
+                  color: AppColors.primaryLight,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppColors.border, width: 1.5),
+                ),
+                child: Center(
+                  child: Text(
+                    bid.workerName.isNotEmpty ? bid.workerName[0].toUpperCase() : 'W',
+                    style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.w800, fontSize: 16),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(bid.workerName, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                    Text(_formatJobTime(bid.createdAt), style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AppColors.successLight,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppColors.success.withValues(alpha: 0.4), width: 1.5),
+                ),
+                child: Text(
+                  '\$${bid.amount.toStringAsFixed(2)}',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.success),
+                ),
+              ),
+            ],
+          ),
+          if (bid.message != null && bid.message!.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppColors.infoLight,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.info.withValues(alpha: 0.2), width: 1),
+              ),
+              child: Text(bid.message!, style: const TextStyle(fontSize: 13, color: AppColors.textSecondary, height: 1.4)),
+            ),
+          ],
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: onAccept,
+              icon: const Icon(Icons.check_circle_outline, size: 18),
+              label: const Text('Accept This Bid', style: TextStyle(fontWeight: FontWeight.w700)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _acceptBid(JobModel job, BidModel bid) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Accept Bid'),
+        content: Text('Hire ${bid.workerName} for \$${bid.amount.toStringAsFixed(2)}?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('No')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
+            child: const Text('Yes, Hire'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    try {
+      final batch = _firestore.batch();
+      batch.update(
+        _firestore.collection(AppConstants.jobsCollection).doc(job.id),
+        {
+          'workerId': bid.workerId,
+          'agreedPrice': bid.amount,
+          'status': AppConstants.jobStatusAccepted,
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+      );
+      batch.update(
+        _firestore.collection(AppConstants.bidsCollection).doc(bid.id),
+        {'status': AppConstants.bidStatusAccepted},
+      );
+      await batch.commit();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${bid.workerName} hired for \$${bid.amount.toStringAsFixed(2)}!'),
+          backgroundColor: AppColors.success,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to accept bid: $e'), backgroundColor: AppColors.error),
+      );
+    }
+  }
+
   // ── Payment Sheet ─────────────────────────────────────────────────────
   Future<void> _showPaymentMethodSheet(JobModel job) async {
     final choice = await showModalBottomSheet<String>(
@@ -1043,10 +1305,10 @@ class _CustomerLandingPageState extends State<CustomerLandingPage> {
 
   String _getJobStatusLabel(String status) {
     switch (status) {
-      case AppConstants.jobStatusAccepted:    return 'Accepted';
+      case AppConstants.jobStatusAccepted:    return 'Worker Picked';
       case AppConstants.jobStatusInProgress:  return 'In Progress';
       case AppConstants.jobStatusCompleted:   return 'Completed';
-      default:                                return 'Requested';
+      default:                                return 'Open for Bids';
     }
   }
 
@@ -1070,8 +1332,8 @@ class _CustomerLandingPageState extends State<CustomerLandingPage> {
 
   Widget _buildJobProgressStepper(int currentStep) {
     const steps = [
-      ('Requested', Icons.send_outlined),
-      ('Accepted', Icons.check_circle_outline),
+      ('Bids Open', Icons.gavel_rounded),
+      ('Worker Picked', Icons.check_circle_outline),
       ('On the Way', Icons.directions_car_outlined),
       ('Completed', Icons.verified_outlined),
     ];
@@ -1244,45 +1506,64 @@ class JobLiveMap extends StatefulWidget {
 
 class _JobLiveMapState extends State<JobLiveMap> with SingleTickerProviderStateMixin {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  StreamSubscription<DocumentSnapshot>? _sub;
-  LatLng? _workerLatLng;
-  LatLng? _prevLatLng;
+  Timer? _pollTimer;
   Timer? _interpTimer;
   AnimationController? _pulseController;
+  LatLng? _workerLatLng;
+  LatLng? _prevLatLng;
+  LatLng? _jobCenter;
 
   @override
   void initState() {
     super.initState();
     _pulseController = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))..repeat();
-    _sub = _firestore.collection(AppConstants.jobsCollection).doc(widget.jobId).snapshots().listen((doc) {
-      final raw = doc.data();
-      final data = raw is Map<String, dynamic> ? raw : <String, dynamic>{};
-      GeoPoint? workerPoint = data['workerLocation'] is GeoPoint ? data['workerLocation'] as GeoPoint : null;
-      if (workerPoint == null) {
-        setState(() => _workerLatLng = null);
-        _cancelInterp();
+    // Fetch immediately, then every 5 seconds
+    _fetchWorkerLocation();
+    _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) => _fetchWorkerLocation());
+  }
+
+  Future<void> _fetchWorkerLocation() async {
+    if (!mounted) return;
+    try {
+      final doc = await _firestore
+          .collection(AppConstants.jobsCollection)
+          .doc(widget.jobId)
+          .get();
+      if (!mounted) return;
+      final data = doc.data() ?? {};
+
+      // Update job center on first fetch
+      if (_jobCenter == null && data['location'] is GeoPoint) {
+        final p = data['location'] as GeoPoint;
+        setState(() => _jobCenter = LatLng(p.latitude, p.longitude));
+      }
+
+      final gp = data['workerLocation'];
+      if (gp is! GeoPoint) {
+        if (_workerLatLng != null) setState(() => _workerLatLng = null);
         return;
       }
-      final next = LatLng(workerPoint.latitude, workerPoint.longitude);
+      final next = LatLng(gp.latitude, gp.longitude);
       if (_workerLatLng == null) {
         setState(() => _workerLatLng = next);
-        return;
+      } else {
+        _prevLatLng = _workerLatLng;
+        _startInterpolation(_prevLatLng!, next);
       }
-      _prevLatLng = _workerLatLng;
-      _startInterpolation(_prevLatLng!, next);
-    });
+    } catch (_) {}
   }
 
   void _startInterpolation(LatLng from, LatLng to) {
     _cancelInterp();
-    const steps = 8;
+    const steps = 10;
     int step = 0;
-    _interpTimer = Timer.periodic(const Duration(milliseconds: 75), (t) {
+    _interpTimer = Timer.periodic(const Duration(milliseconds: 80), (t) {
       step++;
       final tVal = step / steps;
+      if (!mounted) { t.cancel(); return; }
       setState(() {
         _workerLatLng = LatLng(
-          from.latitude + (to.latitude - from.latitude) * tVal,
+          from.latitude  + (to.latitude  - from.latitude)  * tVal,
           from.longitude + (to.longitude - from.longitude) * tVal,
         );
       });
@@ -1297,7 +1578,7 @@ class _JobLiveMapState extends State<JobLiveMap> with SingleTickerProviderStateM
 
   @override
   void dispose() {
-    _sub?.cancel();
+    _pollTimer?.cancel();
     _interpTimer?.cancel();
     _pulseController?.dispose();
     super.dispose();
@@ -1305,94 +1586,82 @@ class _JobLiveMapState extends State<JobLiveMap> with SingleTickerProviderStateM
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<DocumentSnapshot>(
-      future: _firestore.collection(AppConstants.jobsCollection).doc(widget.jobId).get(),
-      builder: (context, snap) {
-        GeoPoint? jobPoint;
-        if (snap.hasData) {
-          final data = snap.data!.data() as Map<String, dynamic>? ?? {};
-          if (data['location'] is GeoPoint) jobPoint = data['location'] as GeoPoint;
-        }
-        final center = jobPoint != null
-            ? LatLng(jobPoint.latitude, jobPoint.longitude)
-            : LatLng(widget.initialLocation.latitude, widget.initialLocation.longitude);
+    final center = _jobCenter
+        ?? LatLng(widget.initialLocation.latitude, widget.initialLocation.longitude);
 
-        final markers = <Marker>{
-          Marker(
-            markerId: const MarkerId('job_location'),
-            position: center,
-            infoWindow: InfoWindow(title: 'Job Location', snippet: widget.initialLocation.address),
-            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+    final markers = <Marker>{
+      Marker(
+        markerId: const MarkerId('job_location'),
+        position: center,
+        infoWindow: InfoWindow(title: 'Job Location', snippet: widget.initialLocation.address),
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+      ),
+    };
+    final circles = <Circle>{};
+
+    if (_workerLatLng != null) {
+      markers.add(Marker(
+        markerId: const MarkerId('worker_location'),
+        position: _workerLatLng!,
+        infoWindow: const InfoWindow(title: 'Worker'),
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+      ));
+      final pulseRadius = 20.0 + 40.0 * (_pulseController?.value ?? 0.0);
+      circles.add(Circle(
+        circleId: const CircleId('worker_pulse'),
+        center: _workerLatLng!,
+        radius: pulseRadius,
+        fillColor: AppColors.success.withValues(alpha: 0.12),
+        strokeColor: AppColors.success.withValues(alpha: 0.4),
+        strokeWidth: 1,
+      ));
+    }
+
+    return Stack(
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: GoogleMap(
+            initialCameraPosition: CameraPosition(target: center, zoom: 14),
+            markers: markers,
+            circles: circles,
+            zoomControlsEnabled: false,
+            myLocationEnabled: false,
+            liteModeEnabled: true,
           ),
-        };
-        final circles = <Circle>{};
-
-        if (_workerLatLng != null) {
-          markers.add(Marker(
-            markerId: const MarkerId('worker_location'),
-            position: _workerLatLng!,
-            infoWindow: const InfoWindow(title: 'Worker'),
-            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-          ));
-          final pulseRadius = 20.0 + 40.0 * (_pulseController?.value ?? 0.0);
-          circles.add(Circle(
-            circleId: const CircleId('worker_pulse'),
-            center: _workerLatLng!,
-            radius: pulseRadius,
-            fillColor: AppColors.success.withValues(alpha: 0.12),
-            strokeColor: AppColors.success.withValues(alpha: 0.4),
-            strokeWidth: 1,
-          ));
-        }
-
-        return Stack(
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: GoogleMap(
-                initialCameraPosition: CameraPosition(target: center, zoom: 14),
-                markers: markers,
-                circles: circles,
-                zoomControlsEnabled: false,
-                myLocationEnabled: false,
-                liteModeEnabled: true,
+        ),
+        Positioned.fill(
+          child: IgnorePointer(
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.border, width: 1.5),
               ),
             ),
-            // Live indicator border
-            Positioned.fill(
-              child: IgnorePointer(
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: AppColors.border, width: 1.5),
-                  ),
-                ),
+          ),
+        ),
+        if (_workerLatLng != null)
+          Positioned(
+            left: 8,
+            top: 8,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: AppColors.error,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: AppColors.border, width: 1),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.circle, color: Colors.white, size: 6),
+                  SizedBox(width: 5),
+                  Text('LIVE', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 11, letterSpacing: 0.5)),
+                ],
               ),
             ),
-            if (_workerLatLng != null)
-              Positioned(
-                left: 8,
-                top: 8,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppColors.error,
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: AppColors.border, width: 1),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.circle, color: Colors.white, size: 6),
-                      SizedBox(width: 5),
-                      Text('LIVE', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 11, letterSpacing: 0.5)),
-                    ],
-                  ),
-                ),
-              ),
-          ],
-        );
-      },
+          ),
+      ],
     );
   }
 }
