@@ -18,7 +18,7 @@ import 'worker_notifications_page.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../data/models/bid_model.dart';
 import '../../../../shared/widgets/wc_components.dart';
-import '../../../../core/services/image_upload_service.dart';
+import '../../../../core/services/supabase_image_upload_service.dart';
 
 class WorkerLandingPage extends StatefulWidget {
   final UserModel user;
@@ -64,7 +64,9 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
 
   @override
   void dispose() {
-    for (final t in _locationTimers.values) { t.cancel(); }
+    for (final t in _locationTimers.values) {
+      t.cancel();
+    }
     _locationTimers.clear();
     super.dispose();
   }
@@ -82,7 +84,13 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
       final inProgressSnap = await _firestore
           .collection(AppConstants.jobsCollection)
           .where('workerId', isEqualTo: widget.user.id)
-          .where('status', whereIn: [AppConstants.jobStatusAccepted, AppConstants.jobStatusInProgress])
+          .where(
+            'status',
+            whereIn: [
+              AppConstants.jobStatusAccepted,
+              AppConstants.jobStatusInProgress,
+            ],
+          )
           .get();
 
       final completedSnap = await _firestore
@@ -136,7 +144,9 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
       backgroundColor: AppColors.background,
       appBar: _buildAppBar(),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: AppColors.worker))
+          ? const Center(
+              child: CircularProgressIndicator(color: AppColors.worker),
+            )
           : SingleChildScrollView(
               padding: const EdgeInsets.all(20),
               child: Column(
@@ -176,11 +186,21 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
               borderRadius: BorderRadius.circular(8),
               border: Border.all(color: AppColors.border, width: 1.5),
             ),
-            child: const Icon(Icons.engineering_rounded, color: Colors.white, size: 18),
+            child: const Icon(
+              Icons.engineering_rounded,
+              color: Colors.white,
+              size: 18,
+            ),
           ),
           const SizedBox(width: 10),
-          const Text('WorkConnect Pro',
-              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, letterSpacing: -0.3)),
+          const Text(
+            'WorkConnect Pro',
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              fontSize: 18,
+              letterSpacing: -0.3,
+            ),
+          ),
         ],
       ),
       actions: [
@@ -189,7 +209,9 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
             IconButton(
               onPressed: () => Navigator.push(
                 context,
-                MaterialPageRoute(builder: (_) => WorkerNotificationsPage(worker: widget.user)),
+                MaterialPageRoute(
+                  builder: (_) => WorkerNotificationsPage(worker: widget.user),
+                ),
               ),
               icon: const Icon(Icons.notifications_outlined),
             ),
@@ -208,7 +230,11 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
                   child: Center(
                     child: Text(
                       '$_pendingJobs',
-                      style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w800),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ),
                 ),
@@ -226,21 +252,48 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
             ),
             child: Center(
               child: Text(
-                widget.user.name.isNotEmpty ? widget.user.name[0].toUpperCase() : 'W',
-                style: const TextStyle(color: AppColors.worker, fontWeight: FontWeight.w800, fontSize: 14),
+                widget.user.name.isNotEmpty
+                    ? widget.user.name[0].toUpperCase()
+                    : 'W',
+                style: const TextStyle(
+                  color: AppColors.worker,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 14,
+                ),
               ),
             ),
           ),
-          onSelected: (value) { if (value == 'logout') _signOut(); },
+          onSelected: (value) {
+            if (value == 'logout') _signOut();
+          },
           itemBuilder: (context) => [
             PopupMenuItem(
               enabled: false,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(widget.user.name, style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                  Text(widget.user.email, style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
-                  const Text('Professional Worker', style: TextStyle(color: AppColors.worker, fontSize: 11, fontWeight: FontWeight.w700)),
+                  Text(
+                    widget.user.name,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  Text(
+                    widget.user.email,
+                    style: const TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const Text(
+                    'Professional Worker',
+                    style: TextStyle(
+                      color: AppColors.worker,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                   const SizedBox(height: 4),
                   const Divider(height: 1),
                 ],
@@ -252,7 +305,10 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
                 children: [
                   Icon(Icons.logout_rounded, color: AppColors.error, size: 18),
                   SizedBox(width: 8),
-                  Text('Sign Out', style: TextStyle(fontWeight: FontWeight.w600)),
+                  Text(
+                    'Sign Out',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
                 ],
               ),
             ),
@@ -292,8 +348,10 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
                       ),
                     ),
                     const SizedBox(height: 6),
-                    const Text('Ready to take on new jobs today?',
-                        style: TextStyle(color: Colors.white70, fontSize: 14)),
+                    const Text(
+                      'Ready to take on new jobs today?',
+                      style: TextStyle(color: Colors.white70, fontSize: 14),
+                    ),
                   ],
                 ),
               ),
@@ -302,9 +360,16 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.3), width: 1),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.3),
+                    width: 1,
+                  ),
                 ),
-                child: const Icon(Icons.work_outline_rounded, color: Colors.white, size: 28),
+                child: const Icon(
+                  Icons.work_outline_rounded,
+                  color: Colors.white,
+                  size: 28,
+                ),
               ),
             ],
           ),
@@ -315,7 +380,12 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
                 child: _WorkerHeroButton(
                   label: 'Dashboard',
                   icon: Icons.dashboard_outlined,
-                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WorkerDashboardScreen())),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const WorkerDashboardScreen(),
+                    ),
+                  ),
                 ),
               ),
               const SizedBox(width: 10),
@@ -323,7 +393,10 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
                 child: _WorkerHeroButton(
                   label: 'Find Jobs',
                   icon: Icons.map_outlined,
-                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const JobsMapScreen())),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const JobsMapScreen()),
+                  ),
                 ),
               ),
             ],
@@ -348,7 +421,13 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
           icon: Icons.gavel_rounded,
           accentColor: AppColors.primary,
           subtitle: 'Awaiting response',
-          badge: _pendingJobs > 0 ? WcStatusBadge(label: 'OPEN', color: AppColors.primary, filled: true) : null,
+          badge: _pendingJobs > 0
+              ? WcStatusBadge(
+                  label: 'OPEN',
+                  color: AppColors.primary,
+                  filled: true,
+                )
+              : null,
           onTap: _showMyBidsModal,
         ),
         WcStatCard(
@@ -357,7 +436,13 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
           icon: Icons.directions_car_rounded,
           accentColor: AppColors.worker,
           subtitle: 'Accepted + on the way',
-          badge: _inProgressJobs > 0 ? WcStatusBadge(label: 'LIVE', color: AppColors.worker, filled: true) : null,
+          badge: _inProgressJobs > 0
+              ? WcStatusBadge(
+                  label: 'LIVE',
+                  color: AppColors.worker,
+                  filled: true,
+                )
+              : null,
           onTap: _showInProgressJobsModal,
         ),
         WcStatCard(
@@ -420,7 +505,10 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
           subtitle: 'Update skills and information',
           icon: Icons.manage_accounts_rounded,
           iconColor: AppColors.admin,
-          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WorkerDashboardScreen())),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const WorkerDashboardScreen()),
+          ),
         ),
       ],
     );
@@ -437,17 +525,39 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
         children: [
           Row(
             children: [
-              Icon(Icons.lightbulb_outline_rounded, color: AppColors.warning, size: 20),
+              Icon(
+                Icons.lightbulb_outline_rounded,
+                color: AppColors.warning,
+                size: 20,
+              ),
               const SizedBox(width: 8),
-              const Text('Pro Tips',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+              const Text(
+                'Pro Tips',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textPrimary,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 14),
-          _buildTip(Icons.gavel_outlined,          'Place competitive bids quickly to win more jobs'),
-          _buildTip(Icons.photo_camera_outlined,  'Upload photos of completed work to build trust'),
-          _buildTip(Icons.star_border_rounded,    'Maintain a 4.5+ rating to win more bids'),
-          _buildTip(Icons.event_available_outlined,'Keep your availability updated for relevant job matches'),
+          _buildTip(
+            Icons.gavel_outlined,
+            'Place competitive bids quickly to win more jobs',
+          ),
+          _buildTip(
+            Icons.photo_camera_outlined,
+            'Upload photos of completed work to build trust',
+          ),
+          _buildTip(
+            Icons.star_border_rounded,
+            'Maintain a 4.5+ rating to win more bids',
+          ),
+          _buildTip(
+            Icons.event_available_outlined,
+            'Keep your availability updated for relevant job matches',
+          ),
         ],
       ),
     );
@@ -462,7 +572,14 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
           Icon(icon, size: 16, color: AppColors.warning),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(text, style: const TextStyle(fontSize: 13, color: AppColors.textSecondary, height: 1.4)),
+            child: Text(
+              text,
+              style: const TextStyle(
+                fontSize: 13,
+                color: AppColors.textSecondary,
+                height: 1.4,
+              ),
+            ),
           ),
         ],
       ),
@@ -479,7 +596,9 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
         .orderBy('createdAt', descending: true)
         .get();
 
-    final bids = bidsSnap.docs.map((doc) => BidModel.fromFirestore(doc)).toList();
+    final bids = bidsSnap.docs
+        .map((doc) => BidModel.fromFirestore(doc))
+        .toList();
 
     // Load associated job for each bid
     final List<Map<String, dynamic>> bidWithJobs = [];
@@ -507,7 +626,11 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
           builder: (modalCtx, setModalState) => Column(
             children: [
               _buildSheetHandle(),
-              _buildSheetHeader('My Bids', bidWithJobs.length, AppColors.primary),
+              _buildSheetHeader(
+                'My Bids',
+                bidWithJobs.length,
+                AppColors.primary,
+              ),
               Expanded(
                 child: bidWithJobs.isEmpty
                     ? const WcEmptyState(
@@ -561,12 +684,23 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(job.serviceType,
-                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                    Text(
+                      job.serviceType,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                     const SizedBox(height: 3),
-                    Text(job.address,
-                        style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
-                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                    Text(
+                      job.address,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: AppColors.textSecondary,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ],
                 ),
               ),
@@ -574,29 +708,59 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
             ],
           ),
           const SizedBox(height: 10),
-          Text(job.description,
-              style: const TextStyle(fontSize: 13, height: 1.5, color: AppColors.textSecondary),
-              maxLines: 3, overflow: TextOverflow.ellipsis),
-          const SizedBox(height: 10),
-          Row(children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-              decoration: BoxDecoration(
-                color: AppColors.successLight,
-                borderRadius: BorderRadius.circular(7),
-                border: Border.all(color: AppColors.success.withValues(alpha: 0.5), width: 1.5),
-              ),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                const Icon(Icons.gavel_rounded, size: 14, color: AppColors.success),
-                const SizedBox(width: 5),
-                Text('Your Bid: \$${bid.amount.toStringAsFixed(2)}',
-                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.success)),
-              ]),
+          Text(
+            job.description,
+            style: const TextStyle(
+              fontSize: 13,
+              height: 1.5,
+              color: AppColors.textSecondary,
             ),
-            const Spacer(),
-            Text(_formatDate(bid.createdAt),
-                style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
-          ]),
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                decoration: BoxDecoration(
+                  color: AppColors.successLight,
+                  borderRadius: BorderRadius.circular(7),
+                  border: Border.all(
+                    color: AppColors.success.withValues(alpha: 0.5),
+                    width: 1.5,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.gavel_rounded,
+                      size: 14,
+                      color: AppColors.success,
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      'Your Bid: \$${bid.amount.toStringAsFixed(2)}',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.success,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Spacer(),
+              Text(
+                _formatDate(bid.createdAt),
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: AppColors.textMuted,
+                ),
+              ),
+            ],
+          ),
           if (bid.message != null && bid.message!.isNotEmpty) ...[
             const SizedBox(height: 8),
             Container(
@@ -606,31 +770,40 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
                 borderRadius: BorderRadius.circular(7),
                 border: Border.all(color: AppColors.borderLight),
               ),
-              child: Text(bid.message!,
-                  style: const TextStyle(
-                      fontSize: 12, color: AppColors.textSecondary, fontStyle: FontStyle.italic)),
+              child: Text(
+                bid.message!,
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AppColors.textSecondary,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
             ),
           ],
           const SizedBox(height: 12),
-          Wrap(spacing: 8, runSpacing: 8, children: [
-            _SmallButton(
-              label: 'Navigate',
-              icon: Icons.directions_rounded,
-              color: AppColors.info,
-              onTap: () => _navigateToJob(context, job),
-            ),
-            _SmallButton(
-              label: 'Withdraw Bid',
-              icon: Icons.cancel_rounded,
-              color: AppColors.error,
-              onTap: () => _confirmAction(
-                context,
-                'Withdraw Bid',
-                'Withdraw your bid of \$${bid.amount.toStringAsFixed(2)}?',
-                () async => onWithdraw(),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _SmallButton(
+                label: 'Navigate',
+                icon: Icons.directions_rounded,
+                color: AppColors.info,
+                onTap: () => _navigateToJob(context, job),
               ),
-            ),
-          ]),
+              _SmallButton(
+                label: 'Withdraw Bid',
+                icon: Icons.cancel_rounded,
+                color: AppColors.error,
+                onTap: () => _confirmAction(
+                  context,
+                  'Withdraw Bid',
+                  'Withdraw your bid of \$${bid.amount.toStringAsFixed(2)}?',
+                  () async => onWithdraw(),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -645,34 +818,72 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
       await _loadWorkerStats();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Bid withdrawn'), backgroundColor: AppColors.warning),
+        const SnackBar(
+          content: Text('Bid withdrawn'),
+          backgroundColor: AppColors.warning,
+        ),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to withdraw bid: $e'), backgroundColor: AppColors.error),
+        SnackBar(
+          content: Text('Failed to withdraw bid: $e'),
+          backgroundColor: AppColors.error,
+        ),
       );
     }
   }
 
-  Future<void> _addJobImage(String jobId, List<String> currentUrls, {ImageSource source = ImageSource.gallery}) async {
-    final path = await ImageUploadService.pickAndSave(source: source);
-    if (path == null) return;
-    final updated = [...currentUrls, path];
+  Future<void> _addJobImage(
+    String jobId,
+    List<String> currentUrls, {
+    ImageSource source = ImageSource.gallery,
+  }) async {
+    final upload = await SupabaseImageUploadService.pickAndUpload(
+      source: source,
+    );
+    if (upload == null) return;
+    final updated = [...currentUrls, upload.url];
     await _firestore.collection(AppConstants.jobsCollection).doc(jobId).update({
       'imageUrls': updated,
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }
 
-  Future<void> _removeJobImage(String jobId, List<String> currentUrls, int index) async {
-    final path = currentUrls[index];
+  Future<void> _removeJobImage(
+    String jobId,
+    List<String> currentUrls,
+    int index,
+  ) async {
+    final url = currentUrls[index];
     final updated = [...currentUrls]..removeAt(index);
     await _firestore.collection(AppConstants.jobsCollection).doc(jobId).update({
       'imageUrls': updated,
       'updatedAt': FieldValue.serverTimestamp(),
     });
-    await ImageUploadService.deleteLocal(path);
+    final objectPath = _supabaseObjectPathFromUrl(url);
+    if (objectPath != null) {
+      await SupabaseImageUploadService.deleteObject(objectPath);
+    }
+  }
+
+  String? _supabaseObjectPathFromUrl(String url) {
+    try {
+      final uri = Uri.parse(url);
+      final segments = uri.pathSegments;
+      final publicIndex = segments.indexOf('public');
+      if (publicIndex == -1 || publicIndex + 2 >= segments.length) return null;
+      return segments.sublist(publicIndex + 2).join('/');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  ImageProvider _resolveJobImage(String path) {
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      return NetworkImage(path);
+    }
+    return FileImage(File(path));
   }
 
   Future<void> _showInProgressJobsModal() async {
@@ -689,15 +900,20 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
           stream: _firestore
               .collection(AppConstants.jobsCollection)
               .where('workerId', isEqualTo: widget.user.id)
-              .where('status', whereIn: [
-                AppConstants.jobStatusAccepted,
-                AppConstants.jobStatusInProgress,
-              ])
+              .where(
+                'status',
+                whereIn: [
+                  AppConstants.jobStatusAccepted,
+                  AppConstants.jobStatusInProgress,
+                ],
+              )
               .orderBy('createdAt', descending: true)
               .snapshots(),
           builder: (context, snapshot) {
             final jobs = snapshot.hasData
-                ? snapshot.data!.docs.map((d) => JobModel.fromFirestore(d)).toList()
+                ? snapshot.data!.docs
+                      .map((d) => JobModel.fromFirestore(d))
+                      .toList()
                 : <JobModel>[];
             return Column(
               children: [
@@ -705,211 +921,346 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
                 _buildSheetHeader('Active Jobs', jobs.length, AppColors.worker),
                 Expanded(
                   child: !snapshot.hasData
-                      ? const Center(child: CircularProgressIndicator(color: AppColors.worker))
+                      ? const Center(
+                          child: CircularProgressIndicator(
+                            color: AppColors.worker,
+                          ),
+                        )
                       : jobs.isEmpty
-                          ? const WcEmptyState(
-                              icon: Icons.directions_car_outlined,
-                              title: 'No active jobs',
-                              subtitle: 'Place bids on the map — accepted jobs appear here.',
-                            )
-                          : ListView.separated(
-                              controller: scrollController,
+                      ? const WcEmptyState(
+                          icon: Icons.directions_car_outlined,
+                          title: 'No active jobs',
+                          subtitle:
+                              'Place bids on the map — accepted jobs appear here.',
+                        )
+                      : ListView.separated(
+                          controller: scrollController,
+                          padding: const EdgeInsets.all(16),
+                          itemCount: jobs.length,
+                          separatorBuilder: (_, _) =>
+                              const SizedBox(height: 10),
+                          itemBuilder: (context, index) {
+                            final job = jobs[index];
+                            final isBidWon =
+                                job.status == AppConstants.jobStatusAccepted;
+                            return WcCard(
                               padding: const EdgeInsets.all(16),
-                              itemCount: jobs.length,
-                              separatorBuilder: (_, _) => const SizedBox(height: 10),
-                              itemBuilder: (context, index) {
-                                final job = jobs[index];
-                                final isBidWon = job.status == AppConstants.jobStatusAccepted;
-                                return WcCard(
-                                  padding: const EdgeInsets.all(16),
-                                  borderColor: isBidWon ? AppColors.success : AppColors.worker,
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                              borderColor: isBidWon
+                                  ? AppColors.success
+                                  : AppColors.worker,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
-                                      Row(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment: CrossAxisAlignment.start,
-                                              children: [
-                                                Text(job.serviceType,
-                                                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-                                                const SizedBox(height: 3),
-                                                Text(job.address,
-                                                    style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
-                                                    maxLines: 1, overflow: TextOverflow.ellipsis),
-                                              ],
-                                            ),
-                                          ),
-                                          WcStatusBadge(
-                                            label: isBidWon ? 'Bid Won!' : 'Active',
-                                            color: isBidWon ? AppColors.success : AppColors.worker,
-                                            filled: isBidWon,
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 10),
-                                      Text(job.description,
-                                          style: const TextStyle(
-                                              fontSize: 13, height: 1.5, color: AppColors.textSecondary),
-                                          maxLines: 3, overflow: TextOverflow.ellipsis),
-                                      const SizedBox(height: 10),
-                                      // Read-only agreed price (set when customer accepted the bid)
-                                      Row(children: [
-                                        if (job.agreedPrice != null)
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-                                            decoration: BoxDecoration(
-                                              color: AppColors.successLight,
-                                              borderRadius: BorderRadius.circular(7),
-                                              border: Border.all(
-                                                  color: AppColors.success.withValues(alpha: 0.5), width: 1.5),
-                                            ),
-                                            child: Row(mainAxisSize: MainAxisSize.min, children: [
-                                              const Icon(Icons.attach_money_rounded,
-                                                  size: 14, color: AppColors.success),
-                                              Text(job.agreedPrice!.toStringAsFixed(2),
-                                                  style: const TextStyle(
-                                                      fontSize: 13,
-                                                      fontWeight: FontWeight.w800,
-                                                      color: AppColors.success)),
-                                            ]),
-                                          ),
-                                        const Spacer(),
-                                        Text(_formatDate(job.createdAt),
-                                            style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
-                                      ]),
-                                      const SizedBox(height: 12),
-                                      // ── Job Photos ───────────────────────
-                                      Container(
-                                        padding: const EdgeInsets.all(10),
-                                        decoration: BoxDecoration(
-                                          color: AppColors.background,
-                                          borderRadius: BorderRadius.circular(8),
-                                          border: Border.all(color: AppColors.borderLight, width: 1),
-                                        ),
+                                      Expanded(
                                         child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
                                           children: [
-                                            Row(
-                                              children: [
-                                                const Icon(Icons.photo_library_outlined, size: 14, color: AppColors.textSecondary),
-                                                const SizedBox(width: 6),
-                                                const Text('Job Photos',
-                                                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
-                                                const Spacer(),
-                                                GestureDetector(
-                                                  onTap: () => _addJobImage(job.id, job.imageUrls, source: ImageSource.camera),
-                                                  child: const Icon(Icons.camera_alt_outlined, size: 18, color: AppColors.worker),
-                                                ),
-                                                const SizedBox(width: 10),
-                                                GestureDetector(
-                                                  onTap: () => _addJobImage(job.id, job.imageUrls),
-                                                  child: const Icon(Icons.add_photo_alternate_outlined, size: 18, color: AppColors.worker),
-                                                ),
-                                              ],
+                                            Text(
+                                              job.serviceType,
+                                              style: const TextStyle(
+                                                fontSize: 15,
+                                                fontWeight: FontWeight.w700,
+                                              ),
                                             ),
-                                            if (job.imageUrls.isNotEmpty) ...[
-                                              const SizedBox(height: 8),
-                                              SizedBox(
-                                                height: 80,
-                                                child: ListView.separated(
-                                                  scrollDirection: Axis.horizontal,
-                                                  itemCount: job.imageUrls.length,
-                                                  separatorBuilder: (_, _) => const SizedBox(width: 6),
-                                                  itemBuilder: (_, i) {
-                                                    final path = job.imageUrls[i];
-                                                    return Stack(
-                                                      children: [
-                                                        ClipRRect(
-                                                          borderRadius: BorderRadius.circular(6),
-                                                          child: Image.file(
-                                                            File(path),
-                                                            width: 80,
-                                                            height: 80,
-                                                            fit: BoxFit.cover,
-                                                            errorBuilder: (_, _, _) => Container(
-                                                              width: 80, height: 80,
-                                                              decoration: BoxDecoration(
-                                                                color: AppColors.surfaceAlt,
-                                                                borderRadius: BorderRadius.circular(6),
-                                                              ),
-                                                              child: const Icon(Icons.broken_image_outlined, color: AppColors.textMuted),
-                                                            ),
-                                                          ),
-                                                        ),
-                                                        Positioned(
-                                                          top: 2, right: 2,
-                                                          child: GestureDetector(
-                                                            onTap: () => _removeJobImage(job.id, job.imageUrls, i),
-                                                            child: Container(
-                                                              padding: const EdgeInsets.all(2),
-                                                              decoration: const BoxDecoration(
-                                                                color: AppColors.error,
-                                                                shape: BoxShape.circle,
-                                                              ),
-                                                              child: const Icon(Icons.close, size: 10, color: Colors.white),
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    );
-                                                  },
-                                                ),
+                                            const SizedBox(height: 3),
+                                            Text(
+                                              job.address,
+                                              style: const TextStyle(
+                                                fontSize: 13,
+                                                color: AppColors.textSecondary,
                                               ),
-                                            ] else
-                                              Padding(
-                                                padding: const EdgeInsets.only(top: 6),
-                                                child: Text(
-                                                  'Tap the icons above to add photos',
-                                                  style: TextStyle(fontSize: 11, color: AppColors.textMuted),
-                                                ),
-                                              ),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
                                           ],
                                         ),
                                       ),
-                                      const SizedBox(height: 12),
-                                      Wrap(
-                                        spacing: 8,
-                                        runSpacing: 8,
-                                        children: [
-                                          if (isBidWon)
-                                            _SmallButton(
-                                              label: 'On the Way',
-                                              icon: Icons.navigation_rounded,
-                                              color: AppColors.info,
-                                              onTap: () => _updateJobStatus(
-                                                  job.id, AppConstants.jobStatusInProgress, job),
-                                            ),
-                                          _SmallButton(
-                                            label: 'Navigate',
-                                            icon: Icons.directions_rounded,
-                                            color: AppColors.info,
-                                            onTap: () => _navigateToJob(context, job),
-                                          ),
-                                          _SmallButton(
-                                            label: 'Complete',
-                                            icon: Icons.check_circle_rounded,
-                                            color: AppColors.admin,
-                                            onTap: () => _confirmAction(
-                                              context,
-                                              'Complete Job',
-                                              'Mark this job as completed? The customer will be prompted to pay.',
-                                              () async {
-                                                await _updateJobStatus(
-                                                    job.id, AppConstants.jobStatusCompleted, job);
-                                                if (modalContext.mounted) Navigator.pop(modalContext);
-                                              },
-                                            ),
-                                          ),
-                                        ],
+                                      WcStatusBadge(
+                                        label: isBidWon ? 'Bid Won!' : 'Active',
+                                        color: isBidWon
+                                            ? AppColors.success
+                                            : AppColors.worker,
+                                        filled: isBidWon,
                                       ),
                                     ],
                                   ),
-                                );
-                              },
-                            ),
+                                  const SizedBox(height: 10),
+                                  Text(
+                                    job.description,
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      height: 1.5,
+                                      color: AppColors.textSecondary,
+                                    ),
+                                    maxLines: 3,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 10),
+                                  // Read-only agreed price (set when customer accepted the bid)
+                                  Row(
+                                    children: [
+                                      if (job.agreedPrice != null)
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 9,
+                                            vertical: 5,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: AppColors.successLight,
+                                            borderRadius: BorderRadius.circular(
+                                              7,
+                                            ),
+                                            border: Border.all(
+                                              color: AppColors.success
+                                                  .withValues(alpha: 0.5),
+                                              width: 1.5,
+                                            ),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              const Icon(
+                                                Icons.attach_money_rounded,
+                                                size: 14,
+                                                color: AppColors.success,
+                                              ),
+                                              Text(
+                                                job.agreedPrice!
+                                                    .toStringAsFixed(2),
+                                                style: const TextStyle(
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.w800,
+                                                  color: AppColors.success,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      const Spacer(),
+                                      Text(
+                                        _formatDate(job.createdAt),
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          color: AppColors.textMuted,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 12),
+                                  // ── Job Photos ───────────────────────
+                                  Container(
+                                    padding: const EdgeInsets.all(10),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.background,
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(
+                                        color: AppColors.borderLight,
+                                        width: 1,
+                                      ),
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            const Icon(
+                                              Icons.photo_library_outlined,
+                                              size: 14,
+                                              color: AppColors.textSecondary,
+                                            ),
+                                            const SizedBox(width: 6),
+                                            const Text(
+                                              'Job Photos',
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w700,
+                                                color: AppColors.textSecondary,
+                                              ),
+                                            ),
+                                            const Spacer(),
+                                            GestureDetector(
+                                              onTap: () => _addJobImage(
+                                                job.id,
+                                                job.imageUrls,
+                                                source: ImageSource.camera,
+                                              ),
+                                              child: const Icon(
+                                                Icons.camera_alt_outlined,
+                                                size: 18,
+                                                color: AppColors.worker,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 10),
+                                            GestureDetector(
+                                              onTap: () => _addJobImage(
+                                                job.id,
+                                                job.imageUrls,
+                                              ),
+                                              child: const Icon(
+                                                Icons
+                                                    .add_photo_alternate_outlined,
+                                                size: 18,
+                                                color: AppColors.worker,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        if (job.imageUrls.isNotEmpty) ...[
+                                          const SizedBox(height: 8),
+                                          SizedBox(
+                                            height: 80,
+                                            child: ListView.separated(
+                                              scrollDirection: Axis.horizontal,
+                                              itemCount: job.imageUrls.length,
+                                              separatorBuilder: (_, _) =>
+                                                  const SizedBox(width: 6),
+                                              itemBuilder: (_, i) {
+                                                final path = job.imageUrls[i];
+                                                return Stack(
+                                                  children: [
+                                                    ClipRRect(
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            6,
+                                                          ),
+                                                      child: Image(
+                                                        image: _resolveJobImage(
+                                                          path,
+                                                        ),
+                                                        width: 80,
+                                                        height: 80,
+                                                        fit: BoxFit.cover,
+                                                        errorBuilder:
+                                                            (
+                                                              _,
+                                                              _,
+                                                              _,
+                                                            ) => Container(
+                                                              width: 80,
+                                                              height: 80,
+                                                              decoration: BoxDecoration(
+                                                                color: AppColors
+                                                                    .surfaceAlt,
+                                                                borderRadius:
+                                                                    BorderRadius.circular(
+                                                                      6,
+                                                                    ),
+                                                              ),
+                                                              child: const Icon(
+                                                                Icons
+                                                                    .broken_image_outlined,
+                                                                color: AppColors
+                                                                    .textMuted,
+                                                              ),
+                                                            ),
+                                                      ),
+                                                    ),
+                                                    Positioned(
+                                                      top: 2,
+                                                      right: 2,
+                                                      child: GestureDetector(
+                                                        onTap: () =>
+                                                            _removeJobImage(
+                                                              job.id,
+                                                              job.imageUrls,
+                                                              i,
+                                                            ),
+                                                        child: Container(
+                                                          padding:
+                                                              const EdgeInsets.all(
+                                                                2,
+                                                              ),
+                                                          decoration:
+                                                              const BoxDecoration(
+                                                                color: AppColors
+                                                                    .error,
+                                                                shape: BoxShape
+                                                                    .circle,
+                                                              ),
+                                                          child: const Icon(
+                                                            Icons.close,
+                                                            size: 10,
+                                                            color: Colors.white,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                );
+                                              },
+                                            ),
+                                          ),
+                                        ] else
+                                          Padding(
+                                            padding: const EdgeInsets.only(
+                                              top: 6,
+                                            ),
+                                            child: Text(
+                                              'Tap the icons above to add photos',
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                color: AppColors.textMuted,
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Wrap(
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    children: [
+                                      if (isBidWon)
+                                        _SmallButton(
+                                          label: 'On the Way',
+                                          icon: Icons.navigation_rounded,
+                                          color: AppColors.info,
+                                          onTap: () => _updateJobStatus(
+                                            job.id,
+                                            AppConstants.jobStatusInProgress,
+                                            job,
+                                          ),
+                                        ),
+                                      _SmallButton(
+                                        label: 'Navigate',
+                                        icon: Icons.directions_rounded,
+                                        color: AppColors.info,
+                                        onTap: () =>
+                                            _navigateToJob(context, job),
+                                      ),
+                                      _SmallButton(
+                                        label: 'Complete',
+                                        icon: Icons.check_circle_rounded,
+                                        color: AppColors.admin,
+                                        onTap: () => _confirmAction(
+                                          context,
+                                          'Complete Job',
+                                          'Mark this job as completed? The customer will be prompted to pay.',
+                                          () async {
+                                            await _updateJobStatus(
+                                              job.id,
+                                              AppConstants.jobStatusCompleted,
+                                              job,
+                                            );
+                                            if (modalContext.mounted)
+                                              Navigator.pop(modalContext);
+                                          },
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
                 ),
               ],
             );
@@ -926,7 +1277,9 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
           .where('workerId', isEqualTo: widget.user.id)
           .orderBy('createdAt', descending: true)
           .get();
-      final reviews = snapshot.docs.map((doc) => ReviewModel.fromFirestore(doc)).toList();
+      final reviews = snapshot.docs
+          .map((doc) => ReviewModel.fromFirestore(doc))
+          .toList();
       if (!mounted) return;
 
       final Map<int, int> ratingCounts = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0};
@@ -950,8 +1303,15 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Customer Ratings',
-                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: AppColors.textPrimary, letterSpacing: -0.3)),
+                    const Text(
+                      'Customer Ratings',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.textPrimary,
+                        letterSpacing: -0.3,
+                      ),
+                    ),
                     const SizedBox(height: 14),
                     WcCard(
                       backgroundColor: AppColors.warningLight,
@@ -963,23 +1323,46 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('Average Rating', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                              const Text(
+                                'Average Rating',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: AppColors.textSecondary,
+                                ),
+                              ),
                               const SizedBox(height: 4),
-                              Text(_rating.toStringAsFixed(1),
-                                  style: const TextStyle(fontSize: 32, fontWeight: FontWeight.w900, color: AppColors.rating, letterSpacing: -1)),
+                              Text(
+                                _rating.toStringAsFixed(1),
+                                style: const TextStyle(
+                                  fontSize: 32,
+                                  fontWeight: FontWeight.w900,
+                                  color: AppColors.rating,
+                                  letterSpacing: -1,
+                                ),
+                              ),
                             ],
                           ),
                           const Spacer(),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 6,
+                            ),
                             decoration: BoxDecoration(
                               color: AppColors.rating,
                               borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: AppColors.border, width: 1.5),
+                              border: Border.all(
+                                color: AppColors.border,
+                                width: 1.5,
+                              ),
                             ),
                             child: Text(
                               '${reviews.length} reviews',
-                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                              ),
                             ),
                           ),
                         ],
@@ -989,12 +1372,24 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
                     ...List.generate(5, (i) {
                       final stars = 5 - i;
                       final count = ratingCounts[stars] ?? 0;
-                      final pct = reviews.isEmpty ? 0.0 : count / reviews.length;
+                      final pct = reviews.isEmpty
+                          ? 0.0
+                          : count / reviews.length;
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 8),
                         child: Row(
                           children: [
-                            SizedBox(width: 40, child: Text('$stars★', style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.rating, fontSize: 13))),
+                            SizedBox(
+                              width: 40,
+                              child: Text(
+                                '$stars★',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.rating,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
                             Expanded(
                               child: ClipRRect(
                                 borderRadius: BorderRadius.circular(4),
@@ -1002,12 +1397,25 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
                                   value: pct,
                                   minHeight: 8,
                                   backgroundColor: AppColors.surfaceAlt,
-                                  valueColor: const AlwaysStoppedAnimation<Color>(AppColors.rating),
+                                  valueColor:
+                                      const AlwaysStoppedAnimation<Color>(
+                                        AppColors.rating,
+                                      ),
                                 ),
                               ),
                             ),
                             const SizedBox(width: 8),
-                            SizedBox(width: 24, child: Text('$count', textAlign: TextAlign.right, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary))),
+                            SizedBox(
+                              width: 24,
+                              child: Text(
+                                '$count',
+                                textAlign: TextAlign.right,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: AppColors.textSecondary,
+                                ),
+                              ),
+                            ),
                           ],
                         ),
                       );
@@ -1018,12 +1426,17 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
               ),
               Expanded(
                 child: reviews.isEmpty
-                    ? const WcEmptyState(icon: Icons.star_border_rounded, title: 'No reviews yet', subtitle: 'Reviews from customers will appear here.')
+                    ? const WcEmptyState(
+                        icon: Icons.star_border_rounded,
+                        title: 'No reviews yet',
+                        subtitle: 'Reviews from customers will appear here.',
+                      )
                     : ListView.separated(
                         controller: scrollController,
                         padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                         itemCount: reviews.length,
-                        separatorBuilder: (_, index) => const SizedBox(height: 10),
+                        separatorBuilder: (_, index) =>
+                            const SizedBox(height: 10),
                         itemBuilder: (context, index) {
                           final review = reviews[index];
                           return WcCard(
@@ -1036,19 +1449,37 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
                                 Row(
                                   children: [
                                     Row(
-                                      children: List.generate(5, (i) => Icon(
-                                        i < review.rating ? Icons.star_rounded : Icons.star_border_rounded,
-                                        size: 16,
-                                        color: AppColors.rating,
-                                      )),
+                                      children: List.generate(
+                                        5,
+                                        (i) => Icon(
+                                          i < review.rating
+                                              ? Icons.star_rounded
+                                              : Icons.star_border_rounded,
+                                          size: 16,
+                                          color: AppColors.rating,
+                                        ),
+                                      ),
                                     ),
                                     const Spacer(),
-                                    Text(_formatDate(review.createdAt), style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                                    Text(
+                                      _formatDate(review.createdAt),
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        color: AppColors.textMuted,
+                                      ),
+                                    ),
                                   ],
                                 ),
                                 if (review.comment.isNotEmpty) ...[
                                   const SizedBox(height: 8),
-                                  Text(review.comment, style: const TextStyle(fontSize: 13, height: 1.4, color: AppColors.textSecondary)),
+                                  Text(
+                                    review.comment,
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      height: 1.4,
+                                      color: AppColors.textSecondary,
+                                    ),
+                                  ),
                                 ],
                               ],
                             ),
@@ -1064,7 +1495,10 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
       debugPrint('Error showing ratings: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error loading ratings: $e'), backgroundColor: AppColors.error),
+        SnackBar(
+          content: Text('Error loading ratings: $e'),
+          backgroundColor: AppColors.error,
+        ),
       );
     }
   }
@@ -1077,7 +1511,9 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
           .where('status', isEqualTo: AppConstants.jobStatusCompleted)
           .orderBy('completedAt', descending: true)
           .get();
-      final jobs = snapshot.docs.map((doc) => JobModel.fromFirestore(doc)).toList();
+      final jobs = snapshot.docs
+          .map((doc) => JobModel.fromFirestore(doc))
+          .toList();
       if (!mounted) return;
 
       double total = 0.0;
@@ -1103,25 +1539,48 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('Total Earnings', style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+                        const Text(
+                          'Total Earnings',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
                         const SizedBox(height: 4),
-                        Text('\$${total.toStringAsFixed(2)}',
-                            style: const TextStyle(fontSize: 32, fontWeight: FontWeight.w900, color: AppColors.success, letterSpacing: -1)),
+                        Text(
+                          '\$${total.toStringAsFixed(2)}',
+                          style: const TextStyle(
+                            fontSize: 32,
+                            fontWeight: FontWeight.w900,
+                            color: AppColors.success,
+                            letterSpacing: -1,
+                          ),
+                        ),
                       ],
                     ),
                     const Spacer(),
-                    WcStatusBadge(label: '${jobs.length} jobs', color: AppColors.success, filled: true),
+                    WcStatusBadge(
+                      label: '${jobs.length} jobs',
+                      color: AppColors.success,
+                      filled: true,
+                    ),
                   ],
                 ),
               ),
               Expanded(
                 child: jobs.isEmpty
-                    ? const WcEmptyState(icon: Icons.trending_up_rounded, title: 'No completed jobs yet', subtitle: 'Completed jobs and earnings will appear here.')
+                    ? const WcEmptyState(
+                        icon: Icons.trending_up_rounded,
+                        title: 'No completed jobs yet',
+                        subtitle:
+                            'Completed jobs and earnings will appear here.',
+                      )
                     : ListView.separated(
                         controller: scrollController,
                         padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                         itemCount: jobs.length,
-                        separatorBuilder: (_, index) => const SizedBox(height: 10),
+                        separatorBuilder: (_, index) =>
+                            const SizedBox(height: 10),
                         itemBuilder: (context, index) {
                           final job = jobs[index];
                           return WcCard(
@@ -1132,20 +1591,47 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
                               children: [
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
-                                      Text(job.serviceType, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+                                      Text(
+                                        job.serviceType,
+                                        style: const TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
                                       const SizedBox(height: 3),
-                                      Text(job.address, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                      Text(
+                                        job.address,
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          color: AppColors.textSecondary,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
                                       const SizedBox(height: 3),
-                                      Text(_formatDate(job.completedAt ?? DateTime.now()), style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                                      Text(
+                                        _formatDate(
+                                          job.completedAt ?? DateTime.now(),
+                                        ),
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          color: AppColors.textMuted,
+                                        ),
+                                      ),
                                     ],
                                   ),
                                 ),
                                 const SizedBox(width: 12),
                                 Text(
                                   '\$${(job.agreedPrice ?? 0).toStringAsFixed(2)}',
-                                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.success),
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w800,
+                                    color: AppColors.success,
+                                  ),
                                 ),
                               ],
                             ),
@@ -1161,7 +1647,10 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
       debugPrint('Error showing earnings: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error loading earnings: $e'), backgroundColor: AppColors.error),
+        SnackBar(
+          content: Text('Error loading earnings: $e'),
+          backgroundColor: AppColors.error,
+        ),
       );
     }
   }
@@ -1192,7 +1681,12 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
           Expanded(
             child: Text(
               title,
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: AppColors.textPrimary, letterSpacing: -0.3),
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+                color: AppColors.textPrimary,
+                letterSpacing: -0.3,
+              ),
             ),
           ),
           WcStatusBadge(label: '$count', color: color),
@@ -1203,15 +1697,22 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
 
   // ── Job update / navigation logic (unchanged) ────────────────────────────
 
-  Future<void> _updateJobStatus(String jobId, String status, JobModel job) async {
+  Future<void> _updateJobStatus(
+    String jobId,
+    String status,
+    JobModel job,
+  ) async {
     try {
-      final docRef = _firestore.collection(AppConstants.jobsCollection).doc(jobId);
+      final docRef = _firestore
+          .collection(AppConstants.jobsCollection)
+          .doc(jobId);
       final updates = <String, dynamic>{
         'status': status,
         'updatedAt': FieldValue.serverTimestamp(),
       };
 
-      if (status == AppConstants.jobStatusInProgress || status == 'in_progress') {
+      if (status == AppConstants.jobStatusInProgress ||
+          status == 'in_progress') {
         updates['workerId'] = widget.user.id;
         updates['acceptedAt'] = job.acceptedAt != null
             ? Timestamp.fromDate(job.acceptedAt!)
@@ -1228,21 +1729,25 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
 
       await docRef.update(updates);
 
-      if (status == AppConstants.jobStatusInProgress || status == 'in_progress') {
+      if (status == AppConstants.jobStatusInProgress ||
+          status == 'in_progress') {
         await _startLocationStream(jobId);
       }
 
       await _loadWorkerStats();
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Job updated')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Job updated')));
     } catch (e) {
       debugPrint('Error updating job status: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to update job: $e'), backgroundColor: AppColors.error),
+        SnackBar(
+          content: Text('Failed to update job: $e'),
+          backgroundColor: AppColors.error,
+        ),
       );
     }
   }
@@ -1250,12 +1755,17 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
   Future<void> _pushLocationForJob(String jobId) async {
     try {
       final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.best),
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.best,
+        ),
       );
-      await _firestore.collection(AppConstants.jobsCollection).doc(jobId).update({
-        'workerLocation': GeoPoint(pos.latitude, pos.longitude),
-        'workerLocationUpdatedAt': FieldValue.serverTimestamp(),
-      });
+      await _firestore
+          .collection(AppConstants.jobsCollection)
+          .doc(jobId)
+          .update({
+            'workerLocation': GeoPoint(pos.latitude, pos.longitude),
+            'workerLocationUpdatedAt': FieldValue.serverTimestamp(),
+          });
     } catch (e) {
       debugPrint('Error writing location for job $jobId: $e');
     }
@@ -1302,22 +1812,32 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
         if (places.isNotEmpty) {
           lat = places.first.latitude;
           lng = places.first.longitude;
-          await _firestore.collection(AppConstants.jobsCollection).doc(job.id).update({
-            'location': GeoPoint(lat, lng),
-            'locationResolvedAt': FieldValue.serverTimestamp(),
-          });
+          await _firestore
+              .collection(AppConstants.jobsCollection)
+              .doc(job.id)
+              .update({
+                'location': GeoPoint(lat, lng),
+                'locationResolvedAt': FieldValue.serverTimestamp(),
+              });
         }
       }
-      final uri = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving');
+      final uri = Uri.parse(
+        'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving',
+      );
       if (await canLaunchUrl(uri)) {
         await launchUrl(uri);
       } else if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not open Maps')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Could not open Maps')));
       }
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to resolve address: $e'), backgroundColor: AppColors.error),
+          SnackBar(
+            content: Text('Failed to resolve address: $e'),
+            backgroundColor: AppColors.error,
+          ),
         );
       }
     }
@@ -1335,10 +1855,16 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
         title: Text(title),
         content: Text(message),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('No')),
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('No'),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(c, true),
-            child: const Text('Yes', style: TextStyle(color: AppColors.primary)),
+            child: const Text(
+              'Yes',
+              style: TextStyle(color: AppColors.primary),
+            ),
           ),
         ],
       ),
@@ -1362,16 +1888,22 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
               'Mark availability for urgent jobs',
               'Schedule time off',
               'Set service areas',
-            ].map((t) => Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Row(
-                children: [
-                  const Icon(Icons.check_circle_rounded, color: AppColors.worker, size: 16),
-                  const SizedBox(width: 8),
-                  Text(t, style: const TextStyle(fontSize: 14)),
-                ],
+            ].map(
+              (t) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.check_circle_rounded,
+                      color: AppColors.worker,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(t, style: const TextStyle(fontSize: 14)),
+                  ],
+                ),
               ),
-            )),
+            ),
           ],
         ),
         actions: [
@@ -1389,8 +1921,8 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
   String _formatDate(DateTime date) {
     final diff = DateTime.now().difference(date);
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24)   return '${diff.inHours}h ago';
-    if (diff.inDays < 7)     return '${diff.inDays}d ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    if (diff.inDays < 7) return '${diff.inDays}d ago';
     return '${date.day}/${date.month}/${date.year}';
   }
 
@@ -1410,7 +1942,11 @@ class _WorkerHeroButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
 
-  const _WorkerHeroButton({required this.label, required this.icon, required this.onTap});
+  const _WorkerHeroButton({
+    required this.label,
+    required this.icon,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1422,14 +1958,27 @@ class _WorkerHeroButton extends StatelessWidget {
           color: Colors.white,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: AppColors.border, width: 1.5),
-          boxShadow: const [BoxShadow(color: AppColors.shadow, offset: Offset(2, 2), blurRadius: 0)],
+          boxShadow: const [
+            BoxShadow(
+              color: AppColors.shadow,
+              offset: Offset(2, 2),
+              blurRadius: 0,
+            ),
+          ],
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(icon, size: 18, color: AppColors.worker),
             const SizedBox(width: 7),
-            Text(label, style: const TextStyle(color: AppColors.worker, fontWeight: FontWeight.w700, fontSize: 13)),
+            Text(
+              label,
+              style: const TextStyle(
+                color: AppColors.worker,
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+              ),
+            ),
           ],
         ),
       ),
@@ -1446,7 +1995,12 @@ class _SmallButton extends StatelessWidget {
   final Color color;
   final VoidCallback onTap;
 
-  const _SmallButton({required this.label, required this.icon, required this.color, required this.onTap});
+  const _SmallButton({
+    required this.label,
+    required this.icon,
+    required this.color,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1464,7 +2018,14 @@ class _SmallButton extends StatelessWidget {
           children: [
             Icon(icon, size: 14, color: color),
             const SizedBox(width: 5),
-            Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: color)),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: color,
+              ),
+            ),
           ],
         ),
       ),
