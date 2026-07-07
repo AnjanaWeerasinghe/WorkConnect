@@ -44,6 +44,13 @@ class StripeService {
     required String customerId,
     required BuildContext context,
   }) async {
+    if (kDebugMode) {
+      // In debug/sandbox mode, show the web dialog on all platforms to allow
+      // mock/sandbox card payments without needing any local or deployed servers.
+      if (!context.mounted) return false;
+      return _showWebCardDialog(context, 'mock_client_secret', amount);
+    }
+
     final amountInCents = (amount * 100).round();
 
     late http.Response response;
@@ -198,6 +205,15 @@ class _WebCardDialogState extends State<_WebCardDialog> {
     setState(() { _loading = true; _error = null; });
 
     try {
+      if (widget.clientSecret == 'mock_client_secret') {
+        // Simulate local sandbox delay then succeed
+        await Future.delayed(const Duration(milliseconds: 1500));
+        if (mounted) {
+          Navigator.of(context).pop(true);
+        }
+        return;
+      }
+
       // Step 1 — create PaymentMethod via Stripe (publishable key is safe client-side)
       final pmRes = await http.post(
         Uri.parse('https://api.stripe.com/v1/payment_methods'),
