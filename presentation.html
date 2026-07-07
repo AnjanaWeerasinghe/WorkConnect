@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WorkConnect — Presentation</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: #111;
+      overflow: hidden;
+      height: 100vh;
+      width: 100vw;
+    }
+
+    .slides { width: 100%; height: 100vh; position: relative; }
+
+    .slide {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column;
+      justify-content: center; align-items: center;
+      padding: 52px 68px;
+      opacity: 0; transform: translateX(80px);
+      transition: opacity .5s ease, transform .5s ease;
+      pointer-events: none;
+    }
+    .slide.active  { opacity: 1; transform: translateX(0);    pointer-events: all; }
+    .slide.exit    { opacity: 0; transform: translateX(-80px); }
+
+    .slide-num {
+      position: absolute; bottom: 26px; right: 42px;
+      font-size: 12px; letter-spacing: .5px;
+    }
+    .slide-label {
+      position: absolute; top: 26px; left: 42px;
+      font-size: 11px; font-weight: 700; letter-spacing: 2px;
+      text-transform: uppercase; opacity: .4;
+    }
+
+    /* ═══════════════════════════════════════
+       S1 — HOME PAGE
+    ═══════════════════════════════════════ */
+    #s1 {
+      background: linear-gradient(135deg, #f97316 0%, #ea580c 45%, #16a34a 100%);
+      color: #fff; text-align: center;
+    }
+    #s1 .slide-num, #s1 .slide-label { color: rgba(255,255,255,0.45); }
+    #s1 .logo-ring {
+      width: 112px; height: 112px; border-radius: 50%;
+      background: rgba(255,255,255,0.15);
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 28px;
+      box-shadow: 0 0 0 20px rgba(255,255,255,0.06);
+    }
+    #s1 .logo-ring svg { width: 56px; height: 56px; fill: #fff; }
+    #s1 h1 { font-size: 64px; font-weight: 800; letter-spacing: -2px; line-height: 1; }
+    #s1 h1 span { color: #fde68a; }
+    #s1 .tagline { margin-top: 18px; font-size: 22px; font-weight: 400; opacity: .9; }
+    #s1 .pills {
+      display: flex; gap: 12px; margin-top: 42px;
+      flex-wrap: wrap; justify-content: center;
+    }
+    #s1 .pill {
+      background: rgba(255,255,255,0.18);
+      border: 1.5px solid rgba(255,255,255,0.35);
+      border-radius: 999px; padding: 9px 24px;
+      font-size: 14px; font-weight: 600; backdrop-filter: blur(6px);
+    }
+    #s1 .by {
+      margin-top: 36px; font-size: 13px;
+      opacity: .6; letter-spacing: .5px;
+    }
+
+    /* ═══════════════════════════════════════
+       S2 — INTRODUCTION
+    ═══════════════════════════════════════ */
+    #s2 {
+      background: linear-gradient(150deg, #0a0f1a 0%, #0f172a 55%, #0a1a0f 100%);
+      color: #e2e8f0;
+    }
+    #s2 .slide-num, #s2 .slide-label { color: #1e3a5f; }
+    #s2 h2 {
+      font-size: 42px; font-weight: 800; margin-bottom: 8px; text-align: center;
+      background: linear-gradient(90deg, #f97316, #fbbf24, #4ade80);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    #s2 .sub {
+      font-size: 15px; color: #64748b; margin-bottom: 42px; text-align: center;
+    }
+    #s2 .cols {
+      display: flex; gap: 22px; width: 100%; max-width: 1020px;
+    }
+    #s2 .icol {
+      flex: 1; border-radius: 18px; padding: 28px 24px;
+      border-top: 4px solid; display: flex; flex-direction: column; gap: 14px;
+    }
+    #s2 .icol.cust  { background: rgba(249,115,22,0.07);  border-color: #f97316; }
+    #s2 .icol.work  { background: rgba(22,163,74,0.07);   border-color: #16a34a; }
+    #s2 .icol.admin { background: rgba(139,92,246,0.07);  border-color: #8b5cf6; }
+
+    #s2 .icol-head {
+      display: flex; align-items: center; gap: 12px; margin-bottom: 4px;
+    }
+    #s2 .icol-icon {
+      width: 44px; height: 44px; border-radius: 12px;
+      display: flex; align-items: center; justify-content: center; font-size: 22px;
+    }
+    #s2 .icol.cust  .icol-icon { background: rgba(249,115,22,0.15); }
+    #s2 .icol.work  .icol-icon { background: rgba(22,163,74,0.15);  }
+    #s2 .icol.admin .icol-icon { background: rgba(139,92,246,0.15); }
+
+    #s2 .icol-title { font-size: 18px; font-weight: 700; }
+    #s2 .icol.cust  .icol-title { color: #fb923c; }
+    #s2 .icol.work  .icol-title { color: #4ade80; }
+    #s2 .icol.admin .icol-title { color: #c4b5fd; }
+    #s2 .icol-desc { font-size: 13px; color: #64748b; line-height: 1.6; }
+
+    #s2 .feat-item {
+      display: flex; align-items: center; gap: 10px;
+      font-size: 13px; color: #94a3b8;
+    }
+    #s2 .feat-item::before {
+      content: ''; width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+    }
+    #s2 .icol.cust  .feat-item::before { background: #f97316; }
+    #s2 .icol.work  .feat-item::before { background: #16a34a; }
+    #s2 .icol.admin .feat-item::before { background: #8b5cf6; }
+
+    #s2 .intro-footer {
+      margin-top: 36px;
+      display: flex; gap: 24px; flex-wrap: wrap; justify-content: center;
+    }
+    #s2 .istat {
+      text-align: center;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 14px; padding: 14px 28px;
+    }
+    #s2 .istat-val { font-size: 26px; font-weight: 800; color: #f97316; }
+    #s2 .istat-lbl { font-size: 11px; color: #475569; margin-top: 2px; }
+
+    /* ═══════════════════════════════════════
+       S3 — PROBLEM BRIEF
+    ═══════════════════════════════════════ */
+    #s3 {
+      background: linear-gradient(140deg, #0f0a0a 0%, #1a0606 50%, #2d0d0d 100%);
+      color: #fef2f2;
+    }
+    #s3 .slide-num, #s3 .slide-label { color: #7f1d1d; }
+    #s3 h2 {
+      font-size: 42px; font-weight: 800; margin-bottom: 8px; text-align: center;
+      background: linear-gradient(90deg, #f87171, #fca5a5);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    #s3 .sub { font-size: 15px; color: #6b7280; margin-bottom: 38px; text-align: center; }
+    #s3 .problems {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+      width: 100%; max-width: 860px;
+    }
+    #s3 .prob {
+      display: flex; gap: 16px; align-items: flex-start;
+      background: rgba(239,68,68,0.06);
+      border: 1px solid rgba(239,68,68,0.18);
+      border-left: 3px solid #ef4444;
+      border-radius: 12px; padding: 18px 20px;
+    }
+    #s3 .prob-icon { font-size: 26px; flex-shrink: 0; margin-top: 2px; }
+    #s3 .prob-title { font-size: 14px; font-weight: 700; color: #fca5a5; margin-bottom: 4px; }
+    #s3 .prob-body  { font-size: 13px; color: #6b7280; line-height: 1.55; }
+    #s3 .stat-row {
+      display: flex; gap: 24px; margin-top: 32px; flex-wrap: wrap; justify-content: center;
+    }
+    #s3 .stat {
+      text-align: center;
+      background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.2);
+      border-radius: 14px; padding: 14px 26px;
+    }
+    #s3 .stat-val { font-size: 28px; font-weight: 800; color: #f87171; }
+    #s3 .stat-lbl { font-size: 11px; color: #6b7280; margin-top: 2px; }
+
+    /* ═══════════════════════════════════════
+       S4 — AIM & OBJECTIVES
+    ═══════════════════════════════════════ */
+    #s4 {
+      background: linear-gradient(150deg, #080c18 0%, #0d1530 55%, #091528 100%);
+      color: #e0f2fe;
+    }
+    #s4 .slide-num, #s4 .slide-label { color: #1e3a5f; }
+    #s4 h2 {
+      font-size: 42px; font-weight: 800; margin-bottom: 8px; text-align: center;
+      background: linear-gradient(90deg, #38bdf8, #818cf8);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    #s4 .sub { font-size: 15px; color: #475569; margin-bottom: 32px; text-align: center; }
+    #s4 .layout { display: flex; gap: 28px; width: 100%; max-width: 1040px; }
+    #s4 .aim-box {
+      flex: 0 0 290px;
+      background: rgba(56,189,248,0.07);
+      border: 1px solid rgba(56,189,248,0.22); border-top: 3px solid #38bdf8;
+      border-radius: 16px; padding: 26px 22px;
+      display: flex; flex-direction: column;
+    }
+    #s4 .aim-box h3 {
+      font-size: 12px; font-weight: 700; letter-spacing: 2px;
+      text-transform: uppercase; color: #38bdf8; margin-bottom: 12px;
+    }
+    #s4 .aim-box p { font-size: 14px; line-height: 1.7; color: #94a3b8; flex: 1; }
+    #s4 .aim-highlight {
+      margin-top: 16px; padding: 11px 13px;
+      background: rgba(56,189,248,0.1); border-radius: 10px;
+      font-size: 12px; color: #7dd3fc; line-height: 1.5;
+      border-left: 2px solid #38bdf8;
+    }
+    #s4 .obj-list { flex: 1; display: flex; flex-direction: column; gap: 10px; }
+    #s4 .obj {
+      display: flex; gap: 13px; align-items: center;
+      background: rgba(129,140,248,0.06); border: 1px solid rgba(129,140,248,0.15);
+      border-radius: 12px; padding: 13px 16px;
+    }
+    #s4 .obj-num {
+      width: 28px; height: 28px; border-radius: 8px;
+      background: rgba(129,140,248,0.18); color: #818cf8;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 800; flex-shrink: 0;
+    }
+    #s4 .obj-text { font-size: 13px; color: #cbd5e1; line-height: 1.45; }
+    #s4 .obj-text strong { color: #a5b4fc; }
+
+    /* ═══════════════════════════════════════
+       S5 — HOW IT WORKS
+    ═══════════════════════════════════════ */
+    #s5 { background: #0f172a; color: #e2e8f0; }
+    #s5 .slide-num, #s5 .slide-label { color: #334155; }
+    #s5 h2 {
+      font-size: 40px; font-weight: 800; margin-bottom: 10px;
+      background: linear-gradient(90deg, #f97316, #16a34a);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    #s5 .sub { font-size: 15px; color: #94a3b8; margin-bottom: 36px; }
+    #s5 .columns { display: flex; gap: 28px; width: 100%; max-width: 1000px; }
+    #s5 .col {
+      flex: 1; background: #1e293b; border-radius: 18px;
+      padding: 28px 24px; border-top: 4px solid;
+    }
+    #s5 .col.customer { border-color: #f97316; }
+    #s5 .col.worker   { border-color: #16a34a; }
+    #s5 .col-title {
+      display: flex; align-items: center; gap: 10px;
+      font-size: 18px; font-weight: 700; margin-bottom: 20px;
+    }
+    #s5 .col.customer .col-title { color: #fb923c; }
+    #s5 .col.worker   .col-title { color: #4ade80; }
+    #s5 .step {
+      display: flex; align-items: flex-start; gap: 12px;
+      margin-bottom: 14px; font-size: 14px; color: #cbd5e1;
+    }
+    #s5 .step-num {
+      min-width: 24px; height: 24px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 700; flex-shrink: 0; margin-top: 1px;
+    }
+    #s5 .col.customer .step-num { background: #431407; color: #fb923c; }
+    #s5 .col.worker   .step-num { background: #052e16; color: #4ade80; }
+    #s5 .arrow {
+      font-size: 26px; color: #fbbf24;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; align-self: center;
+    }
+
+    /* ═══════════════════════════════════════
+       S6 — ADMIN PANEL
+    ═══════════════════════════════════════ */
+    #s6 {
+      background: linear-gradient(150deg, #0d0b17 0%, #130d2e 55%, #1a0a2e 100%);
+      color: #ede9fe;
+    }
+    #s6 .slide-num, #s6 .slide-label { color: #4c1d95; }
+    #s6 h2 {
+      font-size: 40px; font-weight: 800; margin-bottom: 8px;
+      background: linear-gradient(90deg, #a78bfa, #818cf8);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    #s6 .sub { font-size: 15px; color: #6d28d9; margin-bottom: 30px; }
+    #s6 .layout { display: flex; gap: 30px; width: 100%; max-width: 1040px; align-items: flex-start; }
+    #s6 .panel {
+      flex: 0 0 316px; background: rgba(139,92,246,0.08);
+      border: 1px solid rgba(139,92,246,0.25); border-radius: 18px; overflow: hidden;
+    }
+    #s6 .panel-header {
+      background: #5b21b6; padding: 14px 18px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    #s6 .panel-header span { font-size: 16px; font-weight: 700; color: #fff; }
+    #s6 .panel-header small { font-size: 11px; color: rgba(255,255,255,0.6); margin-left: auto; }
+    #s6 .tabs { display: flex; border-bottom: 1px solid rgba(139,92,246,0.2); }
+    #s6 .tab {
+      flex: 1; text-align: center; padding: 9px 4px;
+      font-size: 11px; font-weight: 600; color: #6d28d9; cursor: default;
+    }
+    #s6 .tab.active { color: #a78bfa; border-bottom: 2px solid #a78bfa; }
+    #s6 .worker-row {
+      display: flex; align-items: center; gap: 11px;
+      padding: 12px 16px; border-bottom: 1px solid rgba(139,92,246,0.1);
+    }
+    #s6 .avatar {
+      width: 34px; height: 34px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 14px; flex-shrink: 0;
+    }
+    #s6 .avatar.a { background: #fef3c7; color: #92400e; }
+    #s6 .avatar.b { background: #d1fae5; color: #065f46; }
+    #s6 .avatar.c { background: #ede9fe; color: #4c1d95; }
+    #s6 .winfo { flex: 1; }
+    #s6 .wname { font-size: 13px; font-weight: 600; color: #ede9fe; }
+    #s6 .wcat  { font-size: 11px; color: #7c3aed; margin-top: 1px; }
+    #s6 .status-pill {
+      padding: 3px 9px; border-radius: 999px; font-size: 10px; font-weight: 700;
+    }
+    #s6 .status-pill.pending  { background: rgba(251,191,36,0.15); color: #fbbf24; border: 1px solid rgba(251,191,36,0.3); }
+    #s6 .status-pill.approved { background: rgba(74,222,128,0.15);  color: #4ade80; border: 1px solid rgba(74,222,128,0.3);  }
+    #s6 .status-pill.rejected { background: rgba(248,113,113,0.15); color: #f87171; border: 1px solid rgba(248,113,113,0.3); }
+    #s6 .actions { display: flex; gap: 6px; padding: 10px 16px; }
+    #s6 .act-btn {
+      flex: 1; padding: 7px; border-radius: 8px; border: none;
+      font-size: 11px; font-weight: 700; cursor: default;
+    }
+    #s6 .act-btn.approve { background: #16a34a; color: #fff; }
+    #s6 .act-btn.reject  { background: transparent; color: #f87171; border: 1px solid #f87171; }
+    #s6 .features { flex: 1; display: flex; flex-direction: column; gap: 14px; }
+    #s6 .feat {
+      display: flex; gap: 14px; align-items: flex-start;
+      background: rgba(139,92,246,0.07); border: 1px solid rgba(139,92,246,0.18);
+      border-radius: 13px; padding: 16px 18px;
+    }
+    #s6 .feat-icon {
+      width: 40px; height: 40px; border-radius: 10px;
+      background: rgba(139,92,246,0.2);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 19px; flex-shrink: 0;
+    }
+    #s6 .feat-title { font-size: 14px; font-weight: 700; color: #c4b5fd; margin-bottom: 3px; }
+    #s6 .feat-body  { font-size: 12px; color: #6d28d9; line-height: 1.5; }
+
+    /* ═══════════════════════════════════════
+       S7 — TECH STACK
+    ═══════════════════════════════════════ */
+    #s7 {
+      background: linear-gradient(160deg, #0c0a09 0%, #1c1917 60%, #0f2310 100%);
+      color: #f5f5f4;
+    }
+    #s7 .slide-num, #s7 .slide-label { color: #292524; }
+    #s7 h2 {
+      font-size: 40px; font-weight: 800; margin-bottom: 8px;
+      background: linear-gradient(90deg, #4ade80, #22d3ee);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    #s7 .sub { font-size: 15px; color: #78716c; margin-bottom: 34px; }
+    #s7 .grid {
+      display: grid; grid-template-columns: repeat(3, 1fr);
+      gap: 18px; width: 100%; max-width: 960px;
+    }
+    #s7 .card {
+      background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09);
+      border-radius: 16px; padding: 22px 20px; transition: transform .2s;
+    }
+    #s7 .card:hover { transform: translateY(-4px); }
+    #s7 .card-icon { font-size: 28px; margin-bottom: 9px; }
+    #s7 .card-title { font-size: 14px; font-weight: 700; color: #d6d3d1; margin-bottom: 5px; }
+    #s7 .card-body { font-size: 12px; color: #78716c; line-height: 1.6; }
+    #s7 .badge {
+      display: inline-block; margin-top: 6px;
+      background: rgba(74,222,128,0.12); color: #4ade80;
+      border: 1px solid rgba(74,222,128,0.3);
+      border-radius: 999px; padding: 2px 9px; font-size: 10px; font-weight: 600;
+    }
+    #s7 .badge.blue   { background: rgba(34,211,238,0.12); color: #22d3ee; border-color: rgba(34,211,238,0.3); }
+    #s7 .badge.orange { background: rgba(251,146,60,0.12);  color: #fb923c; border-color: rgba(251,146,60,0.3); }
+
+    /* ═══════════════════════════════════════
+       NAV
+    ═══════════════════════════════════════ */
+    .controls {
+      position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+      display: flex; align-items: center; gap: 14px; z-index: 100;
+    }
+    .btn {
+      background: rgba(255,255,255,0.11); border: 1.5px solid rgba(255,255,255,0.22);
+      color: #fff; padding: 9px 26px; border-radius: 999px;
+      font-size: 13px; font-weight: 600; cursor: pointer;
+      transition: background .2s; backdrop-filter: blur(8px);
+    }
+    .btn:hover { background: rgba(255,255,255,0.2); }
+    .btn:disabled { opacity: .28; cursor: default; }
+    .dots { display: flex; gap: 7px; }
+    .dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: rgba(255,255,255,0.28); cursor: pointer;
+      transition: background .2s, transform .2s;
+    }
+    .dot.active { background: #fff; transform: scale(1.4); }
+    .hint { position: fixed; bottom: 22px; left: 32px; font-size: 11px; color: rgba(255,255,255,0.25); }
+  </style>
+</head>
+<body>
+<div class="slides">
+
+  <!-- ══ S1 — HOME PAGE ══ -->
+  <section class="slide active" id="s1">
+    <div class="slide-label">WorkConnect</div>
+    <div class="logo-ring">
+      <svg viewBox="0 0 24 24"><path d="M20 6h-2.18c.07-.44.18-.88.18-1.36C18 2.09 15.91 0 13.36 0c-1.3 0-2.43.52-3.26 1.36L9 2.5l-1.1-1.14C7.07.52 5.94 0 4.64 0 2.09 0 0 2.09 0 4.64c0 .48.11.92.18 1.36H0v2h20V6zm-7 14H4v-8h9v8zm7 0h-5v-8h5v8z"/></svg>
+    </div>
+    <h1>Work<span>Connect</span></h1>
+    <p class="tagline">The on-demand platform connecting customers with skilled workers</p>
+    <div class="pills">
+      <div class="pill">📱 Flutter · Firebase</div>
+      <div class="pill">💳 Stripe Payments</div>
+      <div class="pill">📍 Live GPS Tracking</div>
+      <div class="pill">⭐ Reviews &amp; Ratings</div>
+      <div class="pill">🛡️ Admin Dashboard</div>
+    </div>
+    <p class="by">University of Moratuwa &nbsp;·&nbsp; 2024 / 2025</p>
+    <div class="slide-num">1 / 7</div>
+  </section>
+
+  <!-- ══ S2 — INTRODUCTION ══ -->
+  <section class="slide" id="s2">
+    <div class="slide-label">Introduction</div>
+    <h2>What is WorkConnect?</h2>
+    <p class="sub">A three-sided digital marketplace built for the home services industry</p>
+
+    <div class="cols">
+
+      <div class="icol cust">
+        <div class="icol-head">
+          <div class="icol-icon">🧑‍💼</div>
+          <div class="icol-title">Customer</div>
+        </div>
+        <div class="icol-desc">Homeowners and businesses who need skilled tradespeople — fast, verified, and trackable.</div>
+        <div class="feat-item">Post job requests with location &amp; budget</div>
+        <div class="feat-item">Track workers live on a map</div>
+        <div class="feat-item">Pay by card or cash after service</div>
+        <div class="feat-item">Rate and review completed jobs</div>
+      </div>
+
+      <div class="icol work">
+        <div class="icol-head">
+          <div class="icol-icon">🔧</div>
+          <div class="icol-title">Worker</div>
+        </div>
+        <div class="icol-desc">Verified skilled tradespeople — plumbers, electricians, painters and more — who earn on their own schedule.</div>
+        <div class="feat-item">Receive real-time job notifications</div>
+        <div class="feat-item">Navigate via Google Maps</div>
+        <div class="feat-item">Track earnings &amp; job history</div>
+        <div class="feat-item">Build reputation through ratings</div>
+      </div>
+
+      <div class="icol admin">
+        <div class="icol-head">
+          <div class="icol-icon">🛡️</div>
+          <div class="icol-title">Admin</div>
+        </div>
+        <div class="icol-desc">Platform administrators who control quality by vetting every worker before they can accept jobs.</div>
+        <div class="feat-item">Review worker registration applications</div>
+        <div class="feat-item">Approve or reject with written reason</div>
+        <div class="feat-item">Monitor workforce across 3 status tabs</div>
+        <div class="feat-item">Real-time Firestore-powered dashboard</div>
+      </div>
+
+    </div>
+
+    <div class="intro-footer">
+      <div class="istat"><div class="istat-val">3</div><div class="istat-lbl">User roles</div></div>
+      <div class="istat"><div class="istat-val">Flutter</div><div class="istat-lbl">Single codebase — Android, iOS &amp; Web</div></div>
+      <div class="istat"><div class="istat-val">Firebase</div><div class="istat-lbl">Real-time backend &amp; auth</div></div>
+      <div class="istat"><div class="istat-val">Stripe</div><div class="istat-lbl">Secure payment processing</div></div>
+    </div>
+    <div class="slide-num">2 / 7</div>
+  </section>
+
+  <!-- ══ S3 — PROBLEM BRIEF ══ -->
+  <section class="slide" id="s3">
+    <div class="slide-label">Problem Brief</div>
+    <h2>The Problem We're Solving</h2>
+    <p class="sub">Finding and hiring reliable home service workers is a broken experience for both sides</p>
+
+    <div class="problems">
+      <div class="prob">
+        <div class="prob-icon">🔍</div>
+        <div>
+          <div class="prob-title">No Centralised Discovery</div>
+          <div class="prob-body">Customers rely on word-of-mouth or unverified classifieds to find plumbers, electricians, and tradespeople — with no quality guarantee.</div>
+        </div>
+      </div>
+      <div class="prob">
+        <div class="prob-icon">💸</div>
+        <div>
+          <div class="prob-title">Opaque Pricing &amp; No Digital Payments</div>
+          <div class="prob-body">No standard way to agree on a price upfront and no secure digital payment method — leading to disputes and cash-only complications.</div>
+        </div>
+      </div>
+      <div class="prob">
+        <div class="prob-icon">📍</div>
+        <div>
+          <div class="prob-title">Zero Real-time Visibility</div>
+          <div class="prob-body">Once a worker is booked, customers have no way to track where they are or when they will arrive, causing frustration and missed appointments.</div>
+        </div>
+      </div>
+      <div class="prob">
+        <div class="prob-icon">🛡️</div>
+        <div>
+          <div class="prob-title">No Verification or Trust System</div>
+          <div class="prob-body">Anyone can claim to be skilled. There is no vetting process, no reviews, and no accountability — making hiring risky for customers.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="stat-row">
+      <div class="stat"><div class="stat-val">72%</div><div class="stat-lbl">of customers struggle to find<br>reliable local tradespeople</div></div>
+      <div class="stat"><div class="stat-val">3×</div><div class="stat-lbl">more time spent finding workers<br>vs. completing the job</div></div>
+      <div class="stat"><div class="stat-val">No App</div><div class="stat-lbl">unified platform for<br>Sri Lanka home services</div></div>
+    </div>
+    <div class="slide-num">3 / 7</div>
+  </section>
+
+  <!-- ══ S4 — AIM & OBJECTIVES ══ -->
+  <section class="slide" id="s4">
+    <div class="slide-label">Aim &amp; Objectives</div>
+    <h2>What We Set Out to Build</h2>
+    <p class="sub">A clear mission backed by six measurable development objectives</p>
+
+    <div class="layout">
+      <div class="aim-box">
+        <h3>🎯 Project Aim</h3>
+        <p>To design and develop a <strong style="color:#7dd3fc">cross-platform mobile &amp; web application</strong> that digitises the home service industry by connecting customers with verified workers — enabling real-time tracking, transparent pricing, and secure payment processing.</p>
+        <div class="aim-highlight">
+          <strong>Inspired by:</strong> The Uber model applied to home services — on-demand, location-aware, and fully digital.
+        </div>
+      </div>
+
+      <div class="obj-list">
+        <div class="obj"><div class="obj-num">O1</div><div class="obj-text">Build a <strong>job request system</strong> where customers post service needs with location, description &amp; budget</div></div>
+        <div class="obj"><div class="obj-num">O2</div><div class="obj-text">Implement <strong>real-time GPS tracking</strong> so customers can follow a worker's live location on a map</div></div>
+        <div class="obj"><div class="obj-num">O3</div><div class="obj-text">Integrate <strong>Stripe payment processing</strong> supporting both card (online) and cash payment flows</div></div>
+        <div class="obj"><div class="obj-num">O4</div><div class="obj-text">Develop a <strong>worker dashboard</strong> to manage incoming jobs, navigate to customers &amp; track earnings</div></div>
+        <div class="obj"><div class="obj-num">O5</div><div class="obj-text">Create a <strong>review and star-rating system</strong> with automatic average updates via Cloud Functions</div></div>
+        <div class="obj"><div class="obj-num">O6</div><div class="obj-text">Deliver an <strong>admin panel</strong> for worker registration vetting — approve or reject with written reason</div></div>
+      </div>
+    </div>
+    <div class="slide-num">4 / 7</div>
+  </section>
+
+  <!-- ══ S5 — HOW IT WORKS ══ -->
+  <section class="slide" id="s5">
+    <div class="slide-label">System Flow</div>
+    <h2>How It Works</h2>
+    <p class="sub">A seamless two-sided marketplace — from job request to payment</p>
+    <div class="columns">
+
+      <div class="col customer">
+        <div class="col-title"><span>🧑‍💼</span> Customer Flow</div>
+        <div class="step"><div class="step-num">1</div><span>Browse services &amp; submit a job request with location &amp; budget</span></div>
+        <div class="step"><div class="step-num">2</div><span>Track the assigned worker in real-time on a live map</span></div>
+        <div class="step"><div class="step-num">3</div><span>Worker completes the job &amp; marks it done in the app</span></div>
+        <div class="step"><div class="step-num">4</div><span>Customer selects <strong>Cash</strong> or <strong>Card</strong> to pay, then leaves a review</span></div>
+      </div>
+
+      <div class="arrow">⇄</div>
+
+      <div class="col worker">
+        <div class="col-title"><span>🔧</span> Worker Flow</div>
+        <div class="step"><div class="step-num">1</div><span>Receive a job request notification &amp; accept the job</span></div>
+        <div class="step"><div class="step-num">2</div><span>Navigate to the customer's location via Google Maps</span></div>
+        <div class="step"><div class="step-num">3</div><span>Complete the work, then tap <strong>Complete Job</strong> in the app</span></div>
+        <div class="step"><div class="step-num">4</div><span>Earnings &amp; star ratings update automatically on the dashboard</span></div>
+      </div>
+
+    </div>
+    <div class="slide-num">5 / 7</div>
+  </section>
+
+  <!-- ══ S6 — ADMIN PANEL ══ -->
+  <section class="slide" id="s6">
+    <div class="slide-label">Administration</div>
+    <h2>Admin Panel</h2>
+    <p class="sub">Full control over worker onboarding — approve, reject, and monitor the workforce</p>
+
+    <div class="layout">
+      <div class="panel">
+        <div class="panel-header">
+          <span>🛡️ Admin Panel</span>
+          <small>workconnect-02</small>
+        </div>
+        <div class="tabs">
+          <div class="tab active">⏳ Pending</div>
+          <div class="tab">✅ Approved</div>
+          <div class="tab">❌ Rejected</div>
+        </div>
+        <div class="worker-row">
+          <div class="avatar a">A</div>
+          <div class="winfo">
+            <div class="wname">Amal Perera</div>
+            <div class="wcat">🔧 Plumbing · 3 yrs exp</div>
+          </div>
+          <span class="status-pill pending">Pending</span>
+        </div>
+        <div class="actions">
+          <button class="act-btn approve">✔ Approve</button>
+          <button class="act-btn reject">✘ Reject</button>
+        </div>
+        <div class="worker-row">
+          <div class="avatar b">S</div>
+          <div class="winfo">
+            <div class="wname">Saman Silva</div>
+            <div class="wcat">⚡ Electrical · 5 yrs exp</div>
+          </div>
+          <span class="status-pill approved">Approved</span>
+        </div>
+        <div class="worker-row">
+          <div class="avatar c">N</div>
+          <div class="winfo">
+            <div class="wname">Nimal Fernando</div>
+            <div class="wcat">🎨 Painting · 2 yrs exp</div>
+          </div>
+          <span class="status-pill rejected">Rejected</span>
+        </div>
+      </div>
+
+      <div class="features">
+        <div class="feat">
+          <div class="feat-icon">📋</div>
+          <div>
+            <div class="feat-title">Worker Registration Queue</div>
+            <div class="feat-body">All new worker sign-ups land in <strong style="color:#c4b5fd">Pending</strong>. Admin reviews name, email, phone, service category, experience &amp; description before granting platform access.</div>
+          </div>
+        </div>
+        <div class="feat">
+          <div class="feat-icon">✅</div>
+          <div>
+            <div class="feat-title">One-tap Approve / Reject</div>
+            <div class="feat-body">Approving instantly activates the worker's account. Rejecting requires a <strong style="color:#c4b5fd">written reason</strong> stored in Firestore and visible to the applicant.</div>
+          </div>
+        </div>
+        <div class="feat">
+          <div class="feat-icon">🔴</div>
+          <div>
+            <div class="feat-title">Real-time Firestore Stream</div>
+            <div class="feat-body">The panel uses a live Firestore stream — new registrations appear <strong style="color:#c4b5fd">instantly</strong> without any refresh, across all three status tabs.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="slide-num">6 / 7</div>
+  </section>
+
+  <!-- ══ S7 — TECH STACK ══ -->
+  <section class="slide" id="s7">
+    <div class="slide-label">Technology</div>
+    <h2>Technology Stack</h2>
+    <p class="sub">Built with production-grade tools — cross-platform, real-time, and secure</p>
+    <div class="grid">
+      <div class="card">
+        <div class="card-icon">📱</div>
+        <div class="card-title">Flutter (Dart)</div>
+        <div class="card-body">Single codebase for Android, iOS &amp; Web. Material 3 UI with custom widgets and Provider state management.</div>
+        <span class="badge">Cross-platform</span>
+      </div>
+      <div class="card">
+        <div class="card-icon">🔥</div>
+        <div class="card-title">Firebase</div>
+        <div class="card-body">Firestore real-time database, Firebase Auth, Cloud Storage, Cloud Messaging &amp; Cloud Functions (Node.js).</div>
+        <span class="badge blue">Real-time</span>
+      </div>
+      <div class="card">
+        <div class="card-icon">💳</div>
+        <div class="card-title">Stripe Payments</div>
+        <div class="card-body">Secure sandbox &amp; live payments via PaymentIntent API. Supports card input form &amp; cash declaration flow.</div>
+        <span class="badge orange">Sandbox Ready</span>
+      </div>
+      <div class="card">
+        <div class="card-icon">📍</div>
+        <div class="card-title">Google Maps &amp; GPS</div>
+        <div class="card-body">Live worker tracking with Geolocator. Workers navigate via Google Maps deep-link turn-by-turn directions.</div>
+        <span class="badge">Live Tracking</span>
+      </div>
+      <div class="card">
+        <div class="card-icon">⭐</div>
+        <div class="card-title">Reviews &amp; Ratings</div>
+        <div class="card-body">Post-job star rating system. Worker average rating auto-recalculated on every review event via Cloud Function.</div>
+        <span class="badge blue">Auto-sync</span>
+      </div>
+      <div class="card">
+        <div class="card-icon">🔔</div>
+        <div class="card-title">Notifications</div>
+        <div class="card-body">Firebase Cloud Messaging delivers push notifications to workers for new job requests and status changes.</div>
+        <span class="badge orange">Push Alerts</span>
+      </div>
+    </div>
+    <div class="slide-num">7 / 7</div>
+  </section>
+
+</div>
+
+<!-- Nav -->
+<div class="controls">
+  <button class="btn" id="prevBtn" onclick="go(-1)" disabled>← Prev</button>
+  <div class="dots">
+    <div class="dot active" onclick="goTo(0)"></div>
+    <div class="dot" onclick="goTo(1)"></div>
+    <div class="dot" onclick="goTo(2)"></div>
+    <div class="dot" onclick="goTo(3)"></div>
+    <div class="dot" onclick="goTo(4)"></div>
+    <div class="dot" onclick="goTo(5)"></div>
+    <div class="dot" onclick="goTo(6)"></div>
+  </div>
+  <button class="btn" id="nextBtn" onclick="go(1)">Next →</button>
+</div>
+
+<div class="hint">← → arrow keys to navigate</div>
+
+<script>
+  const slides = document.querySelectorAll('.slide');
+  const dots   = document.querySelectorAll('.dot');
+  let current  = 0;
+
+  function goTo(n) {
+    slides[current].classList.remove('active');
+    slides[current].classList.add('exit');
+    setTimeout(() => slides[current].classList.remove('exit'), 560);
+    current = n;
+    slides[current].classList.add('active');
+    dots.forEach((d, i) => d.classList.toggle('active', i === current));
+    document.getElementById('prevBtn').disabled = current === 0;
+    document.getElementById('nextBtn').disabled = current === slides.length - 1;
+  }
+
+  function go(dir) {
+    const next = current + dir;
+    if (next >= 0 && next < slides.length) goTo(next);
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') go(1);
+    if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   go(-1);
+  });
+</script>
+</body>
+</html>

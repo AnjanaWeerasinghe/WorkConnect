@@ -1,6 +1,9 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'dart:async';
+import 'package:image_picker/image_picker.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:geocoding/geocoding.dart';
@@ -12,10 +15,13 @@ import '../../../../data/repositories/auth_repository.dart';
 import '../../../worker/presentation/worker_dashboard_screen.dart';
 import '../../../location/presentation/pages/jobs_map_screen.dart';
 import 'worker_notifications_page.dart';
+import '../../../../core/theme/app_colors.dart';
+import '../../../../data/models/bid_model.dart';
+import '../../../../shared/widgets/wc_components.dart';
+import '../../../../core/services/supabase_image_upload_service.dart';
 
 class WorkerLandingPage extends StatefulWidget {
   final UserModel user;
-
   const WorkerLandingPage({super.key, required this.user});
 
   @override
@@ -25,10 +31,10 @@ class WorkerLandingPage extends StatefulWidget {
 class _WorkerLandingPageState extends State<WorkerLandingPage> {
   final AuthRepository _authRepository = AuthRepository();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final Map<String, StreamSubscription<Position>> _locationSubscriptions = {};
+  final Map<String, Timer> _locationTimers = {};
 
-  // State variables for real data
   int _pendingJobs = 0;
+  int _inProgressJobs = 0;
   int _completedJobs = 0;
   double _monthlyEarnings = 0.0;
   double _rating = 0.0;
@@ -44,671 +50,534 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
   void didUpdateWidget(covariant WorkerLandingPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.user.id != widget.user.id) {
-      _pendingJobs = 0;
-      _completedJobs = 0;
-      _monthlyEarnings = 0.0;
-      _rating = 0.0;
-      _isLoading = true;
+      setState(() {
+        _pendingJobs = 0;
+        _inProgressJobs = 0;
+        _completedJobs = 0;
+        _monthlyEarnings = 0.0;
+        _rating = 0.0;
+        _isLoading = true;
+      });
       _loadWorkerStats();
     }
   }
 
   @override
   void dispose() {
-    // cancel any active location streams
-    for (final sub in _locationSubscriptions.values) {
-      sub.cancel();
+    for (final t in _locationTimers.values) {
+      t.cancel();
     }
-    _locationSubscriptions.clear();
+    _locationTimers.clear();
     super.dispose();
   }
 
   Future<void> _loadWorkerStats() async {
     try {
-      // Fetch pending jobs (jobs assigned to this worker with status 'requested' or 'accepted')
-      final pendingSnapshot = await _firestore
-          .collection(AppConstants.jobsCollection)
+      // My pending bids (not yet accepted by any customer)
+      final pendingSnap = await _firestore
+          .collection(AppConstants.bidsCollection)
           .where('workerId', isEqualTo: widget.user.id)
-          .where('status', whereIn: [
-            AppConstants.jobStatusRequested,
-            AppConstants.jobStatusAccepted,
-          ])
+          .where('status', isEqualTo: AppConstants.bidStatusPending)
           .get();
 
-      // Fetch completed jobs
-      final completedSnapshot = await _firestore
+      // Active jobs: customer accepted my bid (accepted) + already on the way (in_progress)
+      final inProgressSnap = await _firestore
+          .collection(AppConstants.jobsCollection)
+          .where('workerId', isEqualTo: widget.user.id)
+          .where(
+            'status',
+            whereIn: [
+              AppConstants.jobStatusAccepted,
+              AppConstants.jobStatusInProgress,
+            ],
+          )
+          .get();
+
+      final completedSnap = await _firestore
           .collection(AppConstants.jobsCollection)
           .where('workerId', isEqualTo: widget.user.id)
           .where('status', isEqualTo: AppConstants.jobStatusCompleted)
           .get();
 
-      // Calculate total earnings from completed jobs
       double earnings = 0.0;
-      for (final doc in completedSnapshot.docs) {
+      for (final doc in completedSnap.docs) {
         final job = JobModel.fromFirestore(doc);
-        if (job.agreedPrice != null) {
-          earnings += job.agreedPrice!;
-        }
+        if (job.agreedPrice != null) earnings += job.agreedPrice!;
       }
 
-      // Fetch worker's average rating
-      final reviewsSnapshot = await _firestore
+      final reviewsSnap = await _firestore
           .collection(AppConstants.reviewsCollection)
           .where('workerId', isEqualTo: widget.user.id)
           .get();
 
       double avgRating = 0.0;
-      if (reviewsSnapshot.docs.isNotEmpty) {
-        double totalRating = 0.0;
-        for (final doc in reviewsSnapshot.docs) {
-          final rating = doc['rating'] as num?;
-          if (rating != null) {
-            totalRating += rating.toDouble();
-          }
+      if (reviewsSnap.docs.isNotEmpty) {
+        double total = 0.0;
+        for (final doc in reviewsSnap.docs) {
+          final r = doc['rating'] as num?;
+          if (r != null) total += r.toDouble();
         }
-        avgRating = totalRating / reviewsSnapshot.docs.length;
+        avgRating = total / reviewsSnap.docs.length;
       }
 
       if (mounted) {
         setState(() {
-          _pendingJobs = pendingSnapshot.docs.length;
-          _completedJobs = completedSnapshot.docs.length;
+          _pendingJobs = pendingSnap.docs.length;
+          _inProgressJobs = inProgressSnap.docs.length;
+          _completedJobs = completedSnap.docs.length;
           _monthlyEarnings = earnings;
           _rating = avgRating;
           _isLoading = false;
         });
       }
     } catch (e) {
-      print('Error loading worker stats: $e');
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+      debugPrint('Error loading worker stats: $e');
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  Future<void> _signOut() async {
-    await _authRepository.signOut();
-  }
+  Future<void> _signOut() async => _authRepository.signOut();
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[50],
-      appBar: AppBar(
-        elevation: 0,
-        backgroundColor: Colors.orange,
-        foregroundColor: Colors.white,
-        title: Row(
-          children: [
-            Icon(Icons.work, size: 28),
-            SizedBox(width: 8),
-            Text(
-              'WorkConnect Pro',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 22,
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          Stack(
-            children: [
-              IconButton(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => WorkerNotificationsPage(worker: widget.user),
-                    ),
-                  );
-                },
-                icon: Icon(Icons.notifications_outlined),
-              ),
-              if (_pendingJobs > 0)
-                Positioned(
-                  right: 8,
-                  top: 8,
-                  child: Container(
-                    padding: EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: Colors.red,
-                      shape: BoxShape.circle,
-                    ),
-                    constraints: BoxConstraints(
-                      minWidth: 16,
-                      minHeight: 16,
-                    ),
-                    child: Text(
-                      '$_pendingJobs',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          PopupMenuButton(
-            icon: CircleAvatar(
-              backgroundColor: Colors.white,
-              child: Text(
-                widget.user.name.isNotEmpty ? widget.user.name[0].toUpperCase() : 'W',
-                style: TextStyle(
-                  color: Colors.orange,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-            onSelected: (value) {
-              if (value == 'logout') {
-                _signOut();
-              }
-            },
-            itemBuilder: (context) => [
-              PopupMenuItem(
-                enabled: false,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      widget.user.name,
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black,
-                      ),
-                    ),
-                    Text(
-                      widget.user.email,
-                      style: TextStyle(
-                        color: Colors.grey[600],
-                        fontSize: 12,
-                      ),
-                    ),
-                    Text(
-                      'Professional Worker',
-                      style: TextStyle(
-                        color: Colors.orange,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    Divider(),
-                  ],
-                ),
-              ),
-              PopupMenuItem(
-                value: 'logout',
-                child: Row(
-                  children: [
-                    Icon(Icons.logout, color: Colors.red, size: 20),
-                    SizedBox(width: 8),
-                    Text('Sign Out'),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          SizedBox(width: 8),
-        ],
-      ),
+      backgroundColor: AppColors.background,
+      appBar: _buildAppBar(),
       body: _isLoading
           ? const Center(
-              child: CircularProgressIndicator(color: Colors.orange),
+              child: CircularProgressIndicator(color: AppColors.worker),
             )
           : SingleChildScrollView(
-              padding: EdgeInsets.all(20),
+              padding: const EdgeInsets.all(20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-            // Welcome Section
-            Container(
-              width: double.infinity,
-              padding: EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Colors.green.shade400, Colors.green.shade600],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.green.withOpacity(0.3),
-                    blurRadius: 10,
-                    offset: Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Good ${_getTimeGreeting()}, ${widget.user.name.split(' ')[0]}! 👋',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            SizedBox(height: 8),
-                            Text(
-                              'Ready to take on new jobs today?',
-                              style: TextStyle(
-                                color: Colors.white.withOpacity(0.9),
-                                fontSize: 16,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Container(
-                        padding: EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.2),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          Icons.work_outline,
-                          color: Colors.white,
-                          size: 32,
-                        ),
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: 20),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => WorkerDashboardScreen(),
-                              ),
-                            );
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.white,
-                            foregroundColor: Colors.green,
-                            padding: EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(25),
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.dashboard, size: 20),
-                              SizedBox(width: 8),
-                              Text(
-                                'Dashboard',
-                                style: TextStyle(fontWeight: FontWeight.bold),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      SizedBox(width: 12),
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => JobsMapScreen(),
-                              ),
-                            );
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.white,
-                            foregroundColor: Colors.green,
-                            padding: EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(25),
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.map, size: 20),
-                              SizedBox(width: 8),
-                              Text(
-                                'Find Jobs',
-                                style: TextStyle(fontWeight: FontWeight.bold),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                  _buildHeroCard(),
+                  const SizedBox(height: 28),
+                  const WcSectionHeader(title: 'Overview'),
+                  const SizedBox(height: 14),
+                  _buildStatsGrid(),
+                  const SizedBox(height: 28),
+                  const WcSectionHeader(title: 'Quick Actions'),
+                  const SizedBox(height: 14),
+                  _buildActionList(),
+                  const SizedBox(height: 28),
+                  _buildTipsCard(),
+                  const SizedBox(height: 16),
                 ],
               ),
             ),
+    );
+  }
 
-            SizedBox(height: 32),
-
-            // Stats Overview
-            Text(
-              'Overview',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: Colors.grey[800],
+  PreferredSizeWidget _buildAppBar() {
+    return AppBar(
+      backgroundColor: AppColors.surface,
+      foregroundColor: AppColors.textPrimary,
+      elevation: 0,
+      scrolledUnderElevation: 0,
+      title: Row(
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: AppColors.worker,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppColors.border, width: 1.5),
+            ),
+            child: const Icon(
+              Icons.engineering_rounded,
+              color: Colors.white,
+              size: 18,
+            ),
+          ),
+          const SizedBox(width: 10),
+          const Text(
+            'WorkConnect Pro',
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              fontSize: 18,
+              letterSpacing: -0.3,
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        Stack(
+          children: [
+            IconButton(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => WorkerNotificationsPage(worker: widget.user),
+                ),
               ),
+              icon: const Icon(Icons.notifications_outlined),
             ),
-            SizedBox(height: 16),
-
-            // Stats Cards Grid
-            GridView.count(
-              shrinkWrap: true,
-              physics: NeverScrollableScrollPhysics(),
-              crossAxisCount: 2,
-              crossAxisSpacing: 16,
-              mainAxisSpacing: 16,
-              childAspectRatio: 1.3,
-              children: [
-                _buildStatCard(
-                  'Pending Jobs',
-                  '$_pendingJobs',
-                  Icons.pending_actions,
-                  Colors.orange,
-                  'New requests',
-                ),
-                _buildStatCard(
-                  'Completed',
-                  '$_completedJobs',
-                  Icons.check_circle,
-                  Colors.green,
-                  'This month',
-                ),
-                _buildStatCard(
-                  'Rating',
-                  '${_rating > 0 ? _rating.toStringAsFixed(1) : '0.0'} ⭐',
-                  Icons.star,
-                  Colors.amber,
-                  'Customer reviews',
-                ),
-                _buildStatCard(
-                  'Earnings',
-                  '\$${_monthlyEarnings.toStringAsFixed(0)}',
-                  Icons.attach_money,
-                  Colors.blue,
-                  'This month',
-                ),
-              ],
-            ),
-
-            SizedBox(height: 32),
-
-            // Quick Actions Section
-            Text(
-              'Quick Actions',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: Colors.grey[800],
-              ),
-            ),
-            SizedBox(height: 16),
-
-            // Action Buttons
-            Column(
-              children: [
-                _buildActionButton(
-                  'View Job Requests',
-                  Icons.work_outline,
-                  Colors.orange,
-                  'Check new job opportunities',
-                  () {
-                    _showPendingJobsModal();
-                  },
-                ),
-                SizedBox(height: 12),
-                _buildActionButton(
-                  'Update Availability',
-                  Icons.schedule,
-                  Colors.blue,
-                  'Set your working hours',
-                  () {
-                    _showAvailabilityDialog();
-                  },
-                ),
-                SizedBox(height: 12),
-                _buildActionButton(
-                  'Manage Profile',
-                  Icons.person,
-                  Colors.purple,
-                  'Update your skills and info',
-                  () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => WorkerDashboardScreen(),
+            if (_pendingJobs > 0)
+              Positioned(
+                right: 8,
+                top: 8,
+                child: Container(
+                  width: 16,
+                  height: 16,
+                  decoration: BoxDecoration(
+                    color: AppColors.error,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: AppColors.surface, width: 1.5),
+                  ),
+                  child: Center(
+                    child: Text(
+                      '$_pendingJobs',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w800,
                       ),
-                    );
-                  },
+                    ),
+                  ),
                 ),
-              ],
-            ),
-
-            SizedBox(height: 32),
-
-            // Tips Section
-            Container(
-              width: double.infinity,
-              padding: EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Colors.amber.shade50,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.amber.shade200),
               ),
+          ],
+        ),
+        PopupMenuButton(
+          icon: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: AppColors.workerLight,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppColors.border, width: 1.5),
+            ),
+            child: Center(
+              child: Text(
+                widget.user.name.isNotEmpty
+                    ? widget.user.name[0].toUpperCase()
+                    : 'W',
+                style: const TextStyle(
+                  color: AppColors.worker,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+          ),
+          onSelected: (value) {
+            if (value == 'logout') _signOut();
+          },
+          itemBuilder: (context) => [
+            PopupMenuItem(
+              enabled: false,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Icon(Icons.lightbulb, color: Colors.amber.shade700),
-                      SizedBox(width: 8),
-                      Text(
-                        'Pro Tips',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.grey[800],
-                        ),
-                      ),
-                    ],
+                  Text(
+                    widget.user.name,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary,
+                    ),
                   ),
-                  SizedBox(height: 16),
-                  _buildTipItem('💬', 'Respond to job requests within 1 hour for better visibility'),
-                  _buildTipItem('📷', 'Upload photos of your completed work to build trust'),
-                  _buildTipItem('⭐', 'Maintain a 4.5+ rating to get more job offers'),
-                  _buildTipItem('🕐', 'Keep your availability updated to receive relevant jobs'),
+                  Text(
+                    widget.user.email,
+                    style: const TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const Text(
+                    'Professional Worker',
+                    style: TextStyle(
+                      color: AppColors.worker,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  const Divider(height: 1),
+                ],
+              ),
+            ),
+            const PopupMenuItem(
+              value: 'logout',
+              child: Row(
+                children: [
+                  Icon(Icons.logout_rounded, color: AppColors.error, size: 18),
+                  SizedBox(width: 8),
+                  Text(
+                    'Sign Out',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
                 ],
               ),
             ),
           ],
         ),
+        const SizedBox(width: 8),
+      ],
+      bottom: PreferredSize(
+        preferredSize: const Size.fromHeight(2),
+        child: Container(height: 2, color: AppColors.border),
       ),
     );
   }
 
-
-  Widget _buildStatCard(
-    String title,
-    String value,
-    IconData icon,
-    Color color,
-    String subtitle,
-  ) {
-    return GestureDetector(
-      onTap: () {
-        if (title == 'Rating') {
-          _showRatingsModal();
-        } else if (title == 'Earnings') {
-          _showEarningsModal();
-        }
-      },
-      child: Container(
-        padding: EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 10,
-              offset: Offset(0, 2),
-            ),
-          ],
-        ),
+  Widget _buildHeroCard() {
+    return WcCard(
+      backgroundColor: AppColors.worker,
+      borderColor: AppColors.border,
+      padding: const EdgeInsets.all(22),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(icon, color: color, size: 24),
-              Spacer(),
-              if (title == 'Pending Jobs' && _pendingJobs > 0)
-                Container(
-                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.red,
-                    borderRadius: BorderRadius.circular(12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Good ${_getTimeGreeting()},\n${widget.user.name.split(' ')[0]}.',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.5,
+                        height: 1.2,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Ready to take on new jobs today?',
+                      style: TextStyle(color: Colors.white70, fontSize: 14),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.3),
+                    width: 1,
                   ),
-                  child: Text(
-                    'NEW',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
+                ),
+                child: const Icon(
+                  Icons.work_outline_rounded,
+                  color: Colors.white,
+                  size: 28,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Row(
+            children: [
+              Expanded(
+                child: _WorkerHeroButton(
+                  label: 'Dashboard',
+                  icon: Icons.dashboard_outlined,
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const WorkerDashboardScreen(),
                     ),
                   ),
                 ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _WorkerHeroButton(
+                  label: 'Find Jobs',
+                  icon: Icons.map_outlined,
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const JobsMapScreen()),
+                  ),
+                ),
+              ),
             ],
-          ),
-          SizedBox(height: 8),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-              color: Colors.grey[800],
-            ),
-          ),
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey[600],
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          SizedBox(height: 4),
-          Text(
-            subtitle,
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.grey[500],
-            ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildStatsGrid() {
+    return GridView.count(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      crossAxisCount: 2,
+      crossAxisSpacing: 12,
+      mainAxisSpacing: 12,
+      childAspectRatio: 1.3,
+      children: [
+        WcStatCard(
+          label: 'My Bids',
+          value: '$_pendingJobs',
+          icon: Icons.gavel_rounded,
+          accentColor: AppColors.primary,
+          subtitle: 'Awaiting response',
+          badge: _pendingJobs > 0
+              ? WcStatusBadge(
+                  label: 'OPEN',
+                  color: AppColors.primary,
+                  filled: true,
+                )
+              : null,
+          onTap: _showMyBidsModal,
+        ),
+        WcStatCard(
+          label: 'Active Jobs',
+          value: '$_inProgressJobs',
+          icon: Icons.directions_car_rounded,
+          accentColor: AppColors.worker,
+          subtitle: 'Accepted + on the way',
+          badge: _inProgressJobs > 0
+              ? WcStatusBadge(
+                  label: 'LIVE',
+                  color: AppColors.worker,
+                  filled: true,
+                )
+              : null,
+          onTap: _showInProgressJobsModal,
+        ),
+        WcStatCard(
+          label: 'Completed',
+          value: '$_completedJobs',
+          icon: Icons.check_circle_rounded,
+          accentColor: AppColors.info,
+          subtitle: 'All time',
+          onTap: _showEarningsModal,
+        ),
+        WcStatCard(
+          label: 'Avg Rating',
+          value: _rating > 0 ? _rating.toStringAsFixed(1) : '—',
+          icon: Icons.star_rounded,
+          accentColor: AppColors.rating,
+          subtitle: 'From reviews',
+          onTap: _showRatingsModal,
+        ),
+        WcStatCard(
+          label: 'Total Earnings',
+          value: '\$${_monthlyEarnings.toStringAsFixed(0)}',
+          icon: Icons.account_balance_wallet_outlined,
+          accentColor: AppColors.success,
+          subtitle: 'All completed jobs',
+          onTap: _showEarningsModal,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActionList() {
+    return Column(
+      children: [
+        WcActionRow(
+          title: 'My Bids',
+          subtitle: 'Track jobs you have bid on',
+          icon: Icons.gavel_rounded,
+          iconColor: AppColors.primary,
+          onTap: _showMyBidsModal,
+        ),
+        const SizedBox(height: 10),
+        WcActionRow(
+          title: 'View In-Progress Jobs',
+          subtitle: 'Track and manage active jobs',
+          icon: Icons.directions_car_rounded,
+          iconColor: AppColors.worker,
+          onTap: _showInProgressJobsModal,
+        ),
+        const SizedBox(height: 10),
+        WcActionRow(
+          title: 'Update Availability',
+          subtitle: 'Set your working hours',
+          icon: Icons.schedule_rounded,
+          iconColor: AppColors.info,
+          onTap: _showAvailabilityDialog,
+        ),
+        const SizedBox(height: 10),
+        WcActionRow(
+          title: 'Manage Profile',
+          subtitle: 'Update skills and information',
+          icon: Icons.manage_accounts_rounded,
+          iconColor: AppColors.admin,
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const WorkerDashboardScreen()),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTipsCard() {
+    return WcCard(
+      backgroundColor: AppColors.warningLight,
+      borderColor: AppColors.warning.withValues(alpha: 0.4),
+      hasShadow: false,
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.lightbulb_outline_rounded,
+                color: AppColors.warning,
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              const Text(
+                'Pro Tips',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          _buildTip(
+            Icons.gavel_outlined,
+            'Place competitive bids quickly to win more jobs',
+          ),
+          _buildTip(
+            Icons.photo_camera_outlined,
+            'Upload photos of completed work to build trust',
+          ),
+          _buildTip(
+            Icons.star_border_rounded,
+            'Maintain a 4.5+ rating to win more bids',
+          ),
+          _buildTip(
+            Icons.event_available_outlined,
+            'Keep your availability updated for relevant job matches',
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildActionButton(
-    String title,
-    IconData icon,
-    Color color,
-    String subtitle,
-    VoidCallback onTap,
-  ) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 8,
-              offset: Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: color.withOpacity(0.1),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icon, color: color, size: 24),
-            ),
-            SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                    ),
-                  ),
-                  Text(
-                    subtitle,
-                    style: TextStyle(
-                      color: Colors.grey[600],
-                      fontSize: 14,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Icon(
-              Icons.arrow_forward_ios,
-              color: Colors.grey[400],
-              size: 16,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTipItem(String emoji, String tip) {
+  Widget _buildTip(IconData icon, String text) {
     return Padding(
-      padding: EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: 10),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(emoji, style: TextStyle(fontSize: 16)),
-          SizedBox(width: 12),
+          Icon(icon, size: 16, color: AppColors.warning),
+          const SizedBox(width: 10),
           Expanded(
             child: Text(
-              tip,
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.grey[700],
+              text,
+              style: const TextStyle(
+                fontSize: 13,
+                color: AppColors.textSecondary,
+                height: 1.4,
               ),
             ),
           ),
@@ -717,218 +586,1142 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
     );
   }
 
-  Future<void> _showPendingJobsModal() async {
-    // Fetch pending jobs for this worker
-    final snapshot = await _firestore
-        .collection(AppConstants.jobsCollection)
+  // ── My Bids modal ─────────────────────────────────────────────────────────
+
+  Future<void> _showMyBidsModal() async {
+    final bidsSnap = await _firestore
+        .collection(AppConstants.bidsCollection)
         .where('workerId', isEqualTo: widget.user.id)
-        .where('status', whereIn: [
-          AppConstants.jobStatusRequested,
-          AppConstants.jobStatusAccepted,
-        ])
+        .where('status', isEqualTo: AppConstants.bidStatusPending)
         .orderBy('createdAt', descending: true)
         .get();
 
-    List<JobModel> jobs = snapshot.docs.map((doc) => JobModel.fromFirestore(doc)).toList();
+    final bids = bidsSnap.docs
+        .map((doc) => BidModel.fromFirestore(doc))
+        .toList();
+
+    // Load associated job for each bid
+    final List<Map<String, dynamic>> bidWithJobs = [];
+    for (final bid in bids) {
+      final jobDoc = await _firestore
+          .collection(AppConstants.jobsCollection)
+          .doc(bid.jobId)
+          .get();
+      if (jobDoc.exists) {
+        bidWithJobs.add({'bid': bid, 'job': JobModel.fromFirestore(jobDoc)});
+      }
+    }
+
     if (!mounted) return;
 
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      builder: (context) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.7,
+        maxChildSize: 0.95,
+        minChildSize: 0.5,
+        builder: (context, scrollController) => StatefulBuilder(
+          builder: (modalCtx, setModalState) => Column(
+            children: [
+              _buildSheetHandle(),
+              _buildSheetHeader(
+                'My Bids',
+                bidWithJobs.length,
+                AppColors.primary,
+              ),
+              Expanded(
+                child: bidWithJobs.isEmpty
+                    ? const WcEmptyState(
+                        icon: Icons.gavel_outlined,
+                        title: 'No pending bids',
+                        subtitle: 'Find jobs on the map and place your bid.',
+                      )
+                    : ListView.separated(
+                        controller: scrollController,
+                        padding: const EdgeInsets.all(16),
+                        itemCount: bidWithJobs.length,
+                        separatorBuilder: (_, _) => const SizedBox(height: 10),
+                        itemBuilder: (context, index) {
+                          final bid = bidWithJobs[index]['bid'] as BidModel;
+                          final job = bidWithJobs[index]['job'] as JobModel;
+                          return _buildBidCard(
+                            context: context,
+                            bid: bid,
+                            job: job,
+                            onWithdraw: () async {
+                              await _withdrawBid(bid.id);
+                              setModalState(() => bidWithJobs.removeAt(index));
+                            },
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
       ),
-      builder: (context) {
-        return DraggableScrollableSheet(
+    );
+  }
+
+  Widget _buildBidCard({
+    required BuildContext context,
+    required BidModel bid,
+    required JobModel job,
+    required VoidCallback onWithdraw,
+  }) {
+    return WcCard(
+      padding: const EdgeInsets.all(16),
+      borderColor: AppColors.primary,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      job.serviceType,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      job.address,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: AppColors.textSecondary,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              WcStatusBadge(label: 'Bid Placed', color: AppColors.primary),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            job.description,
+            style: const TextStyle(
+              fontSize: 13,
+              height: 1.5,
+              color: AppColors.textSecondary,
+            ),
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                decoration: BoxDecoration(
+                  color: AppColors.successLight,
+                  borderRadius: BorderRadius.circular(7),
+                  border: Border.all(
+                    color: AppColors.success.withValues(alpha: 0.5),
+                    width: 1.5,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.gavel_rounded,
+                      size: 14,
+                      color: AppColors.success,
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      'Your Bid: \$${bid.amount.toStringAsFixed(2)}',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.success,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Spacer(),
+              Text(
+                _formatDate(bid.createdAt),
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: AppColors.textMuted,
+                ),
+              ),
+            ],
+          ),
+          if (bid.message != null && bid.message!.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceAlt,
+                borderRadius: BorderRadius.circular(7),
+                border: Border.all(color: AppColors.borderLight),
+              ),
+              child: Text(
+                bid.message!,
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AppColors.textSecondary,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _SmallButton(
+                label: 'Navigate',
+                icon: Icons.directions_rounded,
+                color: AppColors.info,
+                onTap: () => _navigateToJob(context, job),
+              ),
+              _SmallButton(
+                label: 'Withdraw Bid',
+                icon: Icons.cancel_rounded,
+                color: AppColors.error,
+                onTap: () => _confirmAction(
+                  context,
+                  'Withdraw Bid',
+                  'Withdraw your bid of \$${bid.amount.toStringAsFixed(2)}?',
+                  () async => onWithdraw(),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _withdrawBid(String bidId) async {
+    try {
+      await _firestore
+          .collection(AppConstants.bidsCollection)
+          .doc(bidId)
+          .update({'status': AppConstants.bidStatusWithdrawn});
+      await _loadWorkerStats();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Bid withdrawn'),
+          backgroundColor: AppColors.warning,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to withdraw bid: $e'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+    }
+  }
+
+  Future<void> _addJobImage(
+    String jobId,
+    List<String> currentUrls, {
+    ImageSource source = ImageSource.gallery,
+  }) async {
+    final upload = await SupabaseImageUploadService.pickAndUpload(
+      source: source,
+    );
+    if (upload == null) return;
+    final updated = [...currentUrls, upload.url];
+    await _firestore.collection(AppConstants.jobsCollection).doc(jobId).update({
+      'imageUrls': updated,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Future<void> _removeJobImage(
+    String jobId,
+    List<String> currentUrls,
+    int index,
+  ) async {
+    final url = currentUrls[index];
+    final updated = [...currentUrls]..removeAt(index);
+    await _firestore.collection(AppConstants.jobsCollection).doc(jobId).update({
+      'imageUrls': updated,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    final objectPath = _supabaseObjectPathFromUrl(url);
+    if (objectPath != null) {
+      await SupabaseImageUploadService.deleteObject(objectPath);
+    }
+  }
+
+  String? _supabaseObjectPathFromUrl(String url) {
+    try {
+      final uri = Uri.parse(url);
+      final segments = uri.pathSegments;
+      final publicIndex = segments.indexOf('public');
+      if (publicIndex == -1 || publicIndex + 2 >= segments.length) return null;
+      return segments.sublist(publicIndex + 2).join('/');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  ImageProvider _resolveJobImage(String path) {
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      return NetworkImage(path);
+    }
+    return FileImage(File(path));
+  }
+
+  Future<void> _showInProgressJobsModal() async {
+    if (!mounted) return;
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (modalContext) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.7,
+        maxChildSize: 0.95,
+        minChildSize: 0.5,
+        builder: (_, scrollController) => StreamBuilder<QuerySnapshot>(
+          stream: _firestore
+              .collection(AppConstants.jobsCollection)
+              .where('workerId', isEqualTo: widget.user.id)
+              .where(
+                'status',
+                whereIn: [
+                  AppConstants.jobStatusAccepted,
+                  AppConstants.jobStatusInProgress,
+                ],
+              )
+              .orderBy('createdAt', descending: true)
+              .snapshots(),
+          builder: (context, snapshot) {
+            final jobs = snapshot.hasData
+                ? snapshot.data!.docs
+                      .map((d) => JobModel.fromFirestore(d))
+                      .toList()
+                : <JobModel>[];
+            return Column(
+              children: [
+                _buildSheetHandle(),
+                _buildSheetHeader('Active Jobs', jobs.length, AppColors.worker),
+                Expanded(
+                  child: !snapshot.hasData
+                      ? const Center(
+                          child: CircularProgressIndicator(
+                            color: AppColors.worker,
+                          ),
+                        )
+                      : jobs.isEmpty
+                      ? const WcEmptyState(
+                          icon: Icons.directions_car_outlined,
+                          title: 'No active jobs',
+                          subtitle:
+                              'Place bids on the map — accepted jobs appear here.',
+                        )
+                      : ListView.separated(
+                          controller: scrollController,
+                          padding: const EdgeInsets.all(16),
+                          itemCount: jobs.length,
+                          separatorBuilder: (_, _) =>
+                              const SizedBox(height: 10),
+                          itemBuilder: (context, index) {
+                            final job = jobs[index];
+                            final isBidWon =
+                                job.status == AppConstants.jobStatusAccepted;
+                            return WcCard(
+                              padding: const EdgeInsets.all(16),
+                              borderColor: isBidWon
+                                  ? AppColors.success
+                                  : AppColors.worker,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              job.serviceType,
+                                              style: const TextStyle(
+                                                fontSize: 15,
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 3),
+                                            Text(
+                                              job.address,
+                                              style: const TextStyle(
+                                                fontSize: 13,
+                                                color: AppColors.textSecondary,
+                                              ),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      WcStatusBadge(
+                                        label: isBidWon ? 'Bid Won!' : 'Active',
+                                        color: isBidWon
+                                            ? AppColors.success
+                                            : AppColors.worker,
+                                        filled: isBidWon,
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Text(
+                                    job.description,
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      height: 1.5,
+                                      color: AppColors.textSecondary,
+                                    ),
+                                    maxLines: 3,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 10),
+                                  // Read-only agreed price (set when customer accepted the bid)
+                                  Row(
+                                    children: [
+                                      if (job.agreedPrice != null)
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 9,
+                                            vertical: 5,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: AppColors.successLight,
+                                            borderRadius: BorderRadius.circular(
+                                              7,
+                                            ),
+                                            border: Border.all(
+                                              color: AppColors.success
+                                                  .withValues(alpha: 0.5),
+                                              width: 1.5,
+                                            ),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              const Icon(
+                                                Icons.attach_money_rounded,
+                                                size: 14,
+                                                color: AppColors.success,
+                                              ),
+                                              Text(
+                                                job.agreedPrice!
+                                                    .toStringAsFixed(2),
+                                                style: const TextStyle(
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.w800,
+                                                  color: AppColors.success,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      const Spacer(),
+                                      Text(
+                                        _formatDate(job.createdAt),
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          color: AppColors.textMuted,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 12),
+                                  // ── Job Photos ───────────────────────
+                                  Container(
+                                    padding: const EdgeInsets.all(10),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.background,
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(
+                                        color: AppColors.borderLight,
+                                        width: 1,
+                                      ),
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            const Icon(
+                                              Icons.photo_library_outlined,
+                                              size: 14,
+                                              color: AppColors.textSecondary,
+                                            ),
+                                            const SizedBox(width: 6),
+                                            const Text(
+                                              'Job Photos',
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w700,
+                                                color: AppColors.textSecondary,
+                                              ),
+                                            ),
+                                            const Spacer(),
+                                            GestureDetector(
+                                              onTap: () => _addJobImage(
+                                                job.id,
+                                                job.imageUrls,
+                                                source: ImageSource.camera,
+                                              ),
+                                              child: const Icon(
+                                                Icons.camera_alt_outlined,
+                                                size: 18,
+                                                color: AppColors.worker,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 10),
+                                            GestureDetector(
+                                              onTap: () => _addJobImage(
+                                                job.id,
+                                                job.imageUrls,
+                                              ),
+                                              child: const Icon(
+                                                Icons
+                                                    .add_photo_alternate_outlined,
+                                                size: 18,
+                                                color: AppColors.worker,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        if (job.imageUrls.isNotEmpty) ...[
+                                          const SizedBox(height: 8),
+                                          SizedBox(
+                                            height: 80,
+                                            child: ListView.separated(
+                                              scrollDirection: Axis.horizontal,
+                                              itemCount: job.imageUrls.length,
+                                              separatorBuilder: (_, _) =>
+                                                  const SizedBox(width: 6),
+                                              itemBuilder: (_, i) {
+                                                final path = job.imageUrls[i];
+                                                return Stack(
+                                                  children: [
+                                                    ClipRRect(
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            6,
+                                                          ),
+                                                      child: Image(
+                                                        image: _resolveJobImage(
+                                                          path,
+                                                        ),
+                                                        width: 80,
+                                                        height: 80,
+                                                        fit: BoxFit.cover,
+                                                        errorBuilder:
+                                                            (
+                                                              _,
+                                                              _,
+                                                              _,
+                                                            ) => Container(
+                                                              width: 80,
+                                                              height: 80,
+                                                              decoration: BoxDecoration(
+                                                                color: AppColors
+                                                                    .surfaceAlt,
+                                                                borderRadius:
+                                                                    BorderRadius.circular(
+                                                                      6,
+                                                                    ),
+                                                              ),
+                                                              child: const Icon(
+                                                                Icons
+                                                                    .broken_image_outlined,
+                                                                color: AppColors
+                                                                    .textMuted,
+                                                              ),
+                                                            ),
+                                                      ),
+                                                    ),
+                                                    Positioned(
+                                                      top: 2,
+                                                      right: 2,
+                                                      child: GestureDetector(
+                                                        onTap: () =>
+                                                            _removeJobImage(
+                                                              job.id,
+                                                              job.imageUrls,
+                                                              i,
+                                                            ),
+                                                        child: Container(
+                                                          padding:
+                                                              const EdgeInsets.all(
+                                                                2,
+                                                              ),
+                                                          decoration:
+                                                              const BoxDecoration(
+                                                                color: AppColors
+                                                                    .error,
+                                                                shape: BoxShape
+                                                                    .circle,
+                                                              ),
+                                                          child: const Icon(
+                                                            Icons.close,
+                                                            size: 10,
+                                                            color: Colors.white,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                );
+                                              },
+                                            ),
+                                          ),
+                                        ] else
+                                          Padding(
+                                            padding: const EdgeInsets.only(
+                                              top: 6,
+                                            ),
+                                            child: Text(
+                                              'Tap the icons above to add photos',
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                color: AppColors.textMuted,
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Wrap(
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    children: [
+                                      if (isBidWon)
+                                        _SmallButton(
+                                          label: 'On the Way',
+                                          icon: Icons.navigation_rounded,
+                                          color: AppColors.info,
+                                          onTap: () => _updateJobStatus(
+                                            job.id,
+                                            AppConstants.jobStatusInProgress,
+                                            job,
+                                          ),
+                                        ),
+                                      _SmallButton(
+                                        label: 'Navigate',
+                                        icon: Icons.directions_rounded,
+                                        color: AppColors.info,
+                                        onTap: () =>
+                                            _navigateToJob(context, job),
+                                      ),
+                                      _SmallButton(
+                                        label: 'Complete',
+                                        icon: Icons.check_circle_rounded,
+                                        color: AppColors.admin,
+                                        onTap: () => _confirmAction(
+                                          context,
+                                          'Complete Job',
+                                          'Mark this job as completed? The customer will be prompted to pay.',
+                                          () async {
+                                            await _updateJobStatus(
+                                              job.id,
+                                              AppConstants.jobStatusCompleted,
+                                              job,
+                                            );
+                                            if (modalContext.mounted)
+                                              Navigator.pop(modalContext);
+                                          },
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showRatingsModal() async {
+    try {
+      final snapshot = await _firestore
+          .collection(AppConstants.reviewsCollection)
+          .where('workerId', isEqualTo: widget.user.id)
+          .orderBy('createdAt', descending: true)
+          .get();
+      final reviews = snapshot.docs
+          .map((doc) => ReviewModel.fromFirestore(doc))
+          .toList();
+      if (!mounted) return;
+
+      final Map<int, int> ratingCounts = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0};
+      for (final r in reviews) {
+        ratingCounts[r.rating] = (ratingCounts[r.rating] ?? 0) + 1;
+      }
+
+      showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        builder: (context) => DraggableScrollableSheet(
           expand: false,
           initialChildSize: 0.7,
           maxChildSize: 0.95,
           minChildSize: 0.5,
-          builder: (context, scrollController) {
-            return StatefulBuilder(
-              builder: (modalContext, setModalState) {
-                return Column(
+          builder: (context, scrollController) => Column(
+            children: [
+              _buildSheetHandle(),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Padding(
-                      padding: const EdgeInsets.all(20),
+                    const Text(
+                      'Customer Ratings',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.textPrimary,
+                        letterSpacing: -0.3,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    WcCard(
+                      backgroundColor: AppColors.warningLight,
+                      borderColor: AppColors.rating.withValues(alpha: 0.4),
+                      hasShadow: false,
+                      padding: const EdgeInsets.all(16),
                       child: Row(
                         children: [
-                          const Text(
-                            'Pending Jobs',
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                            ),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Average Rating',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: AppColors.textSecondary,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                _rating.toStringAsFixed(1),
+                                style: const TextStyle(
+                                  fontSize: 32,
+                                  fontWeight: FontWeight.w900,
+                                  color: AppColors.rating,
+                                  letterSpacing: -1,
+                                ),
+                              ),
+                            ],
                           ),
                           const Spacer(),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 6,
+                            ),
                             decoration: BoxDecoration(
-                              color: Colors.orange[100],
-                              borderRadius: BorderRadius.circular(20),
+                              color: AppColors.rating,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: AppColors.border,
+                                width: 1.5,
+                              ),
                             ),
                             child: Text(
-                              '${jobs.length}',
-                              style: TextStyle(
-                                color: Colors.orange[700],
-                                fontWeight: FontWeight.bold,
+                              '${reviews.length} reviews',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
                               ),
                             ),
                           ),
                         ],
                       ),
                     ),
-                    Expanded(
-                      child: jobs.isEmpty
-                          ? Center(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    Icons.work_outline,
-                                    size: 64,
-                                    color: Colors.grey[300],
-                                  ),
-                                  const SizedBox(height: 16),
+                    const SizedBox(height: 14),
+                    ...List.generate(5, (i) {
+                      final stars = 5 - i;
+                      final count = ratingCounts[stars] ?? 0;
+                      final pct = reviews.isEmpty
+                          ? 0.0
+                          : count / reviews.length;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Row(
+                          children: [
+                            SizedBox(
+                              width: 40,
+                              child: Text(
+                                '$stars★',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.rating,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(4),
+                                child: LinearProgressIndicator(
+                                  value: pct,
+                                  minHeight: 8,
+                                  backgroundColor: AppColors.surfaceAlt,
+                                  valueColor:
+                                      const AlwaysStoppedAnimation<Color>(
+                                        AppColors.rating,
+                                      ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            SizedBox(
+                              width: 24,
+                              child: Text(
+                                '$count',
+                                textAlign: TextAlign.right,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: AppColors.textSecondary,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                    const SizedBox(height: 8),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: reviews.isEmpty
+                    ? const WcEmptyState(
+                        icon: Icons.star_border_rounded,
+                        title: 'No reviews yet',
+                        subtitle: 'Reviews from customers will appear here.',
+                      )
+                    : ListView.separated(
+                        controller: scrollController,
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                        itemCount: reviews.length,
+                        separatorBuilder: (_, index) =>
+                            const SizedBox(height: 10),
+                        itemBuilder: (context, index) {
+                          final review = reviews[index];
+                          return WcCard(
+                            hasShadow: false,
+                            borderColor: AppColors.borderLight,
+                            padding: const EdgeInsets.all(14),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Row(
+                                      children: List.generate(
+                                        5,
+                                        (i) => Icon(
+                                          i < review.rating
+                                              ? Icons.star_rounded
+                                              : Icons.star_border_rounded,
+                                          size: 16,
+                                          color: AppColors.rating,
+                                        ),
+                                      ),
+                                    ),
+                                    const Spacer(),
+                                    Text(
+                                      _formatDate(review.createdAt),
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        color: AppColors.textMuted,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                if (review.comment.isNotEmpty) ...[
+                                  const SizedBox(height: 8),
                                   Text(
-                                    'No pending jobs',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      color: Colors.grey[600],
+                                    review.comment,
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      height: 1.4,
+                                      color: AppColors.textSecondary,
                                     ),
                                   ),
                                 ],
-                              ),
-                            )
-                          : ListView.separated(
-                              controller: scrollController,
-                              padding: const EdgeInsets.all(16),
-                              itemCount: jobs.length,
-                              separatorBuilder: (context, index) => const SizedBox(height: 12),
-                              itemBuilder: (context, index) {
-                                final job = jobs[index];
-                                final jobId = job.id;
-                                return Card(
-                                  elevation: 2,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(16),
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Row(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Expanded(
-                                              child: Column(
-                                                crossAxisAlignment: CrossAxisAlignment.start,
-                                                children: [
-                                                  Text(job.serviceType, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                                                  const SizedBox(height: 4),
-                                                  Text(job.address, style: TextStyle(fontSize: 13, color: Colors.grey[600]), maxLines: 1, overflow: TextOverflow.ellipsis),
-                                                ],
-                                              ),
-                                            ),
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                              decoration: BoxDecoration(color: job.status == 'requested' ? Colors.orange[100] : Colors.green[100], borderRadius: BorderRadius.circular(8)),
-                                              child: Text(job.status == 'requested' ? 'New' : 'Accepted', style: TextStyle(fontWeight: FontWeight.bold, color: job.status == 'requested' ? Colors.orange[700] : Colors.green[700], fontSize: 12)),
-                                            ),
-                                          ],
-                                        ),
-                                        const SizedBox(height: 12),
-                                        Text(job.description, style: const TextStyle(fontSize: 13, height: 1.5), maxLines: 3, overflow: TextOverflow.ellipsis),
-                                        const SizedBox(height: 12),
-                                        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                                          if (job.agreedPrice != null) Text('\$${job.agreedPrice!.toStringAsFixed(2)}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.orange)),
-                                          Text('Created ${_formatDate(job.createdAt)}', style: TextStyle(fontSize: 12, color: Colors.grey[500])),
-                                        ]),
-                                        const SizedBox(height: 12),
-                                        Wrap(
-                                          spacing: 8,
-                                          runSpacing: 8,
-                                          children: [
-                                          ElevatedButton.icon(onPressed: () async {
-                                            try {
-                                              double lat = job.location.latitude;
-                                              double lng = job.location.longitude;
-                                              if ((lat == 0 && lng == 0) || lat.isNaN || lng.isNaN) {
-                                                final places = await locationFromAddress(job.address);
-                                                if (places.isNotEmpty) {
-                                                  lat = places.first.latitude;
-                                                  lng = places.first.longitude;
-                                                  await _firestore.collection(AppConstants.jobsCollection).doc(job.id).update({'location': GeoPoint(lat, lng), 'locationResolvedAt': FieldValue.serverTimestamp()});
-                                                }
-                                              }
-                                              final uri = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving');
-                                              if (await canLaunchUrl(uri)) {
-                                                await launchUrl(uri);
-                                              } else if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not open maps')));
-                                            } catch (e) {
-                                              if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to resolve address: $e')));
-                                            }
-                                          }, icon: const Icon(Icons.directions), label: const Text('Navigate'), style: ElevatedButton.styleFrom(backgroundColor: Colors.blue)),
-                                          ElevatedButton.icon(onPressed: () async { await _updateJobStatus(job.id, AppConstants.jobStatusInProgress, job); }, icon: const Icon(Icons.navigation), label: Text(job.status == AppConstants.jobStatusInProgress ? 'Live' : 'On the way'), style: ElevatedButton.styleFrom(backgroundColor: Colors.green)),
-                                          ElevatedButton.icon(onPressed: () async {
-                                            final ok = await showDialog<bool>(context: context, builder: (c) => AlertDialog(title: const Text('Cancel Job'), content: const Text('Are you sure you want to cancel this job?'), actions: [TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('No')), TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Yes'))]));
-                                            if (ok == true) {
-                                              await _updateJobStatus(jobId, AppConstants.jobStatusCancelled, job);
-                                              setModalState(() { jobs.removeWhere((j) => j.id == jobId); });
-                                            }
-                                          }, icon: const Icon(Icons.cancel), label: const Text('Cancel'), style: ElevatedButton.styleFrom(backgroundColor: Colors.red)),
-                                          ElevatedButton.icon(onPressed: () async {
-                                            final ok = await showDialog<bool>(context: context, builder: (c) => AlertDialog(title: const Text('Complete Job'), content: const Text('Mark this job as completed?'), actions: [TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('No')), TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Yes'))]));
-                                            if (ok == true) {
-                                              await _updateJobStatus(jobId, AppConstants.jobStatusCompleted, job);
-                                              setModalState(() { jobs.removeWhere((j) => j.id == jobId); });
-                                            }
-                                          }, icon: const Icon(Icons.check_circle), label: const Text('Complete'), style: ElevatedButton.styleFrom(backgroundColor: Colors.purple)),
-                                          ElevatedButton.icon(onPressed: () async {
-                                            final ok = await showDialog<bool>(context: context, builder: (c) => AlertDialog(title: const Text('Finish Job'), content: const Text('Use the finished flow to close this job and stop live tracking?'), actions: [TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('No')), TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Yes'))]));
-                                            if (ok == true) {
-                                              await _updateJobStatus(jobId, AppConstants.jobStatusCompleted, job);
-                                              setModalState(() { jobs.removeWhere((j) => j.id == jobId); });
-                                            }
-                                          }, icon: const Icon(Icons.done_all), label: const Text('Finished'), style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple)),
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                );
-                              },
+                              ],
                             ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
+      );
+    } catch (e) {
+      debugPrint('Error showing ratings: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error loading ratings: $e'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+    }
+  }
+
+  Future<void> _showEarningsModal() async {
+    try {
+      final snapshot = await _firestore
+          .collection(AppConstants.jobsCollection)
+          .where('workerId', isEqualTo: widget.user.id)
+          .where('status', isEqualTo: AppConstants.jobStatusCompleted)
+          .orderBy('completedAt', descending: true)
+          .get();
+      final jobs = snapshot.docs
+          .map((doc) => JobModel.fromFirestore(doc))
+          .toList();
+      if (!mounted) return;
+
+      double total = 0.0;
+      for (final job in jobs) {
+        if (job.agreedPrice != null) total += job.agreedPrice!;
+      }
+
+      showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        builder: (context) => DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.7,
+          maxChildSize: 0.95,
+          minChildSize: 0.5,
+          builder: (context, scrollController) => Column(
+            children: [
+              _buildSheetHandle(),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
+                child: Row(
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Total Earnings',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '\$${total.toStringAsFixed(2)}',
+                          style: const TextStyle(
+                            fontSize: 32,
+                            fontWeight: FontWeight.w900,
+                            color: AppColors.success,
+                            letterSpacing: -1,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const Spacer(),
+                    WcStatusBadge(
+                      label: '${jobs.length} jobs',
+                      color: AppColors.success,
+                      filled: true,
                     ),
                   ],
-                );
-              },
-            );
-          },
-        );
-      },
+                ),
+              ),
+              Expanded(
+                child: jobs.isEmpty
+                    ? const WcEmptyState(
+                        icon: Icons.trending_up_rounded,
+                        title: 'No completed jobs yet',
+                        subtitle:
+                            'Completed jobs and earnings will appear here.',
+                      )
+                    : ListView.separated(
+                        controller: scrollController,
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                        itemCount: jobs.length,
+                        separatorBuilder: (_, index) =>
+                            const SizedBox(height: 10),
+                        itemBuilder: (context, index) {
+                          final job = jobs[index];
+                          return WcCard(
+                            hasShadow: false,
+                            borderColor: AppColors.borderLight,
+                            padding: const EdgeInsets.all(14),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        job.serviceType,
+                                        style: const TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 3),
+                                      Text(
+                                        job.address,
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          color: AppColors.textSecondary,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      const SizedBox(height: 3),
+                                      Text(
+                                        _formatDate(
+                                          job.completedAt ?? DateTime.now(),
+                                        ),
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          color: AppColors.textMuted,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Text(
+                                  '\$${(job.agreedPrice ?? 0).toStringAsFixed(2)}',
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w800,
+                                    color: AppColors.success,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
+      );
+    } catch (e) {
+      debugPrint('Error showing earnings: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error loading earnings: $e'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+    }
+  }
+
+  // ── Shared sheet helpers ──────────────────────────────────────────────────
+
+  Widget _buildSheetHandle() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 12, bottom: 4),
+      child: Center(
+        child: Container(
+          width: 36,
+          height: 4,
+          decoration: BoxDecoration(
+            color: AppColors.borderLight,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+      ),
     );
   }
 
-  Future<void> _updateJobStatus(String jobId, String status, JobModel job) async {
-    try {
-      final docRef = _firestore.collection(AppConstants.jobsCollection).doc(jobId);
+  Widget _buildSheetHeader(String title, int count, Color color) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              title,
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+                color: AppColors.textPrimary,
+                letterSpacing: -0.3,
+              ),
+            ),
+          ),
+          WcStatusBadge(label: '$count', color: color),
+        ],
+      ),
+    );
+  }
 
+  // ── Job update / navigation logic (unchanged) ────────────────────────────
+
+  Future<void> _updateJobStatus(
+    String jobId,
+    String status,
+    JobModel job,
+  ) async {
+    try {
+      final docRef = _firestore
+          .collection(AppConstants.jobsCollection)
+          .doc(jobId);
       final updates = <String, dynamic>{
         'status': status,
         'updatedAt': FieldValue.serverTimestamp(),
       };
 
-      if (status == AppConstants.jobStatusInProgress || status == 'in_progress') {
+      if (status == AppConstants.jobStatusInProgress ||
+          status == 'in_progress') {
         updates['workerId'] = widget.user.id;
-        updates['acceptedAt'] = job.acceptedAt != null ? Timestamp.fromDate(job.acceptedAt!) : FieldValue.serverTimestamp();
+        updates['acceptedAt'] = job.acceptedAt != null
+            ? Timestamp.fromDate(job.acceptedAt!)
+            : FieldValue.serverTimestamp();
       }
-
       if (status == AppConstants.jobStatusCompleted || status == 'completed') {
         updates['completedAt'] = FieldValue.serverTimestamp();
-        // stop streaming when completed
         _stopLocationStream(jobId);
       }
-
       if (status == AppConstants.jobStatusCancelled || status == 'cancelled') {
         updates['cancelledAt'] = FieldValue.serverTimestamp();
         _stopLocationStream(jobId);
@@ -936,20 +1729,45 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
 
       await docRef.update(updates);
 
-      if (status == AppConstants.jobStatusInProgress || status == 'in_progress') {
-        // start streaming location to job doc
+      if (status == AppConstants.jobStatusInProgress ||
+          status == 'in_progress') {
         await _startLocationStream(jobId);
       }
 
-      // Refresh local worker stats so counts update immediately
       await _loadWorkerStats();
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Job updated')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Job updated')));
     } catch (e) {
-      print('Error updating job status: $e');
+      debugPrint('Error updating job status: $e');
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to update job: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to update job: $e'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+    }
+  }
+
+  Future<void> _pushLocationForJob(String jobId) async {
+    try {
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.best,
+        ),
+      );
+      await _firestore
+          .collection(AppConstants.jobsCollection)
+          .doc(jobId)
+          .update({
+            'workerLocation': GeoPoint(pos.latitude, pos.longitude),
+            'workerLocationUpdatedAt': FieldValue.serverTimestamp(),
+          });
+    } catch (e) {
+      debugPrint('Error writing location for job $jobId: $e');
     }
   }
 
@@ -959,549 +1777,153 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
       }
-      if (permission == LocationPermission.deniedForever || permission == LocationPermission.denied) {
+      if (permission == LocationPermission.deniedForever ||
+          permission == LocationPermission.denied) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Location permission required')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Location permission required')),
+        );
         return;
       }
+      if (_locationTimers.containsKey(jobId)) return;
 
-      if (_locationSubscriptions.containsKey(jobId)) return; // already streaming
-
-      final stream = Geolocator.getPositionStream(
-        locationSettings: LocationSettings(accuracy: LocationAccuracy.best, distanceFilter: 10),
-      ).listen((Position pos) async {
-        try {
-          await _firestore.collection(AppConstants.jobsCollection).doc(jobId).update({
-            'workerLocation': GeoPoint(pos.latitude, pos.longitude),
-            'workerLocationUpdatedAt': FieldValue.serverTimestamp(),
-          });
-        } catch (e) {
-          print('Error writing location for job $jobId: $e');
-        }
-      });
-
-      _locationSubscriptions[jobId] = stream;
+      // Push immediately, then every 5 seconds
+      await _pushLocationForJob(jobId);
+      _locationTimers[jobId] = Timer.periodic(
+        const Duration(seconds: 5),
+        (_) => _pushLocationForJob(jobId),
+      );
     } catch (e) {
-      print('Error starting location stream: $e');
+      debugPrint('Error starting location timer: $e');
     }
   }
 
   void _stopLocationStream(String jobId) {
-    try {
-      final sub = _locationSubscriptions[jobId];
-      if (sub != null) {
-        sub.cancel();
-        _locationSubscriptions.remove(jobId);
-      }
-    } catch (e) {
-      print('Error stopping location stream: $e');
-    }
+    _locationTimers[jobId]?.cancel();
+    _locationTimers.remove(jobId);
   }
 
-  Future<void> _showRatingsModal() async {
+  Future<void> _navigateToJob(BuildContext context, JobModel job) async {
     try {
-      // Fetch all reviews for this worker
-      final snapshot = await _firestore
-          .collection(AppConstants.reviewsCollection)
-          .where('workerId', isEqualTo: widget.user.id)
-          .orderBy('createdAt', descending: true)
-          .get();
-
-      final reviews = snapshot.docs
-          .map((doc) => ReviewModel.fromFirestore(doc))
-          .toList();
-
-      if (!mounted) return;
-
-      // Calculate rating distribution
-      Map<int, int> ratingCounts = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0};
-      for (final review in reviews) {
-        ratingCounts[review.rating] = (ratingCounts[review.rating] ?? 0) + 1;
-      }
-
-      showModalBottomSheet(
-        context: context,
-        isScrollControlled: true,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        builder: (context) {
-          return DraggableScrollableSheet(
-            expand: false,
-            initialChildSize: 0.7,
-            maxChildSize: 0.95,
-            minChildSize: 0.5,
-            builder: (context, scrollController) {
-              return Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Customer Ratings',
-                          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                                fontWeight: FontWeight.bold,
-                              ),
-                        ),
-                        const SizedBox(height: 16),
-                        // Overall rating card
-                        Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: Colors.amber[50],
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.amber[200]!),
-                          ),
-                          child: Row(
-                            children: [
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Average Rating',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: Colors.grey[700],
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Row(
-                                    children: [
-                                      Text(
-                                        _rating.toStringAsFixed(1),
-                                        style: const TextStyle(
-                                          fontSize: 28,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.amber,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Column(
-                                        children: List.generate(
-                                          5,
-                                          (index) => Icon(
-                                            Icons.star,
-                                            size: 12,
-                                            color: index < _rating.toInt()
-                                                ? Colors.amber
-                                                : Colors.grey[300],
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                              const Spacer(),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 4,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Colors.amber,
-                                  borderRadius: BorderRadius.circular(20),
-                                ),
-                                child: Text(
-                                  '${reviews.length}',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 18,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        // Rating distribution
-                        ...List.generate(
-                          5,
-                          (index) {
-                            final stars = 5 - index;
-                            final count = ratingCounts[stars] ?? 0;
-                            final percentage = reviews.isEmpty
-                                ? 0.0
-                                : (count / reviews.length) * 100;
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: 8),
-                              child: Row(
-                                children: [
-                                  SizedBox(
-                                    width: 50,
-                                    child: Text(
-                                      '$stars★',
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.amber,
-                                      ),
-                                    ),
-                                  ),
-                                  Expanded(
-                                    child: ClipRRect(
-                                      borderRadius: BorderRadius.circular(4),
-                                      child: LinearProgressIndicator(
-                                        value: percentage / 100,
-                                        minHeight: 6,
-                                        backgroundColor: Colors.grey[200],
-                                        valueColor:
-                                            AlwaysStoppedAnimation<Color>(
-                                          Colors.amber[600]!,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  SizedBox(
-                                    width: 30,
-                                    child: Text(
-                                      count.toString(),
-                                      textAlign: TextAlign.right,
-                                      style: TextStyle(
-                                        color: Colors.grey[600],
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                  Expanded(
-                    child: reviews.isEmpty
-                        ? Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  Icons.star_outline,
-                                  size: 64,
-                                  color: Colors.grey[300],
-                                ),
-                                const SizedBox(height: 16),
-                                Text(
-                                  'No reviews yet',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    color: Colors.grey[600],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          )
-                        : ListView.separated(
-                            controller: scrollController,
-                            padding: const EdgeInsets.all(16),
-                            itemCount: reviews.length,
-                            separatorBuilder: (context, index) =>
-                                const SizedBox(height: 12),
-                            itemBuilder: (context, index) {
-                              final review = reviews[index];
-                              return Card(
-                                child: Padding(
-                                  padding: const EdgeInsets.all(12),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          Row(
-                                            children: List.generate(
-                                              5,
-                                              (i) => Icon(
-                                                Icons.star,
-                                                size: 16,
-                                                color: i < review.rating
-                                                    ? Colors.amber
-                                                    : Colors.grey[300],
-                                              ),
-                                            ),
-                                          ),
-                                          Text(
-                                            _formatDate(review.createdAt),
-                                            style: TextStyle(
-                                              fontSize: 11,
-                                              color: Colors.grey[500],
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        review.comment,
-                                        style: const TextStyle(
-                                          fontSize: 13,
-                                          height: 1.4,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                              },
-                            ),
-                  ),
-                ],
-              );
-            },
-          );
-        },
-      );
-    } catch (e) {
-      print('Error showing ratings: $e');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error loading ratings: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
-
-  Future<void> _showEarningsModal() async {
-    try {
-      // Fetch all completed jobs with earnings
-      final snapshot = await _firestore
-          .collection(AppConstants.jobsCollection)
-          .where('workerId', isEqualTo: widget.user.id)
-          .where('status', isEqualTo: AppConstants.jobStatusCompleted)
-          .orderBy('completedAt', descending: true)
-          .get();
-
-      final completedJobs = snapshot.docs
-          .map((doc) => JobModel.fromFirestore(doc))
-          .toList();
-
-      if (!mounted) return;
-
-      // Calculate breakdown
-      double totalEarnings = 0.0;
-      for (final job in completedJobs) {
-        if (job.agreedPrice != null) {
-          totalEarnings += job.agreedPrice!;
+      double lat = job.location.latitude;
+      double lng = job.location.longitude;
+      if ((lat == 0 && lng == 0) || lat.isNaN || lng.isNaN) {
+        final places = await locationFromAddress(job.address);
+        if (places.isNotEmpty) {
+          lat = places.first.latitude;
+          lng = places.first.longitude;
+          await _firestore
+              .collection(AppConstants.jobsCollection)
+              .doc(job.id)
+              .update({
+                'location': GeoPoint(lat, lng),
+                'locationResolvedAt': FieldValue.serverTimestamp(),
+              });
         }
       }
-
-      showModalBottomSheet(
-        context: context,
-        isScrollControlled: true,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        builder: (context) {
-          return DraggableScrollableSheet(
-            expand: false,
-            initialChildSize: 0.7,
-            maxChildSize: 0.95,
-            minChildSize: 0.5,
-            builder: (context, scrollController) {
-              return Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Row(
-                      children: [
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Total Earnings',
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: Colors.grey[700],
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '\$${totalEarnings.toStringAsFixed(2)}',
-                              style: const TextStyle(
-                                fontSize: 28,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.green,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const Spacer(),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.green[100],
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Text(
-                            '${completedJobs.length} jobs',
-                            style: TextStyle(
-                              color: Colors.green[700],
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Expanded(
-                    child: completedJobs.isEmpty
-                        ? Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  Icons.trending_up,
-                                  size: 64,
-                                  color: Colors.grey[300],
-                                ),
-                                const SizedBox(height: 16),
-                                Text(
-                                  'No completed jobs yet',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    color: Colors.grey[600],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          )
-                        : ListView.separated(
-                            controller: scrollController,
-                            padding: const EdgeInsets.all(16),
-                            itemCount: completedJobs.length,
-                            separatorBuilder: (context, index) =>
-                                const SizedBox(height: 12),
-                            itemBuilder: (context, index) {
-                              final job = completedJobs[index];
-                              return Card(
-                                child: Padding(
-                                  padding: const EdgeInsets.all(16),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Text(
-                                                  job.serviceType,
-                                                  style: const TextStyle(
-                                                    fontSize: 16,
-                                                    fontWeight: FontWeight.bold,
-                                                  ),
-                                                ),
-                                                const SizedBox(height: 4),
-                                                Text(
-                                                  job.address,
-                                                  style: TextStyle(
-                                                    fontSize: 13,
-                                                    color: Colors.grey[600],
-                                                  ),
-                                                  maxLines: 1,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 12,
-                                              vertical: 6,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: Colors.green[100],
-                                              borderRadius:
-                                                  BorderRadius.circular(8),
-                                            ),
-                                            child: Text(
-                                              '\$${(job.agreedPrice ?? 0).toStringAsFixed(2)}',
-                                              style: TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                                color: Colors.green[700],
-                                                fontSize: 14,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 12),
-                                      Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          Text(
-                                            'Completed',
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              color: Colors.grey[500],
-                                            ),
-                                          ),
-                                          Text(
-                                            _formatDate(job.completedAt ??
-                                                DateTime.now()),
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              color: Colors.grey[500],
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                              },
-                            ),
-                  ),
-                ],
-              );
-            },
-          );
-        },
+      final uri = Uri.parse(
+        'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving',
       );
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri);
+      } else if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Could not open Maps')));
+      }
     } catch (e) {
-      print('Error showing earnings: $e');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error loading earnings: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to resolve address: $e'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
     }
   }
 
-  String _formatDate(DateTime date) {
-    final now = DateTime.now();
-    final difference = now.difference(date);
+  Future<void> _confirmAction(
+    BuildContext context,
+    String title,
+    String message,
+    Future<void> Function() onConfirm,
+  ) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('No'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text(
+              'Yes',
+              style: TextStyle(color: AppColors.primary),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) await onConfirm();
+  }
 
-    if (difference.inMinutes < 60) {
-      return '${difference.inMinutes}m ago';
-    } else if (difference.inHours < 24) {
-      return '${difference.inHours}h ago';
-    } else if (difference.inDays < 7) {
-      return '${difference.inDays}d ago';
-    } else {
-      return '${date.day}/${date.month}/${date.year}';
-    }
+  void _showAvailabilityDialog() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Update Availability'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('This feature is coming soon. You will be able to:'),
+            const SizedBox(height: 14),
+            ...[
+              'Set working hours',
+              'Mark availability for urgent jobs',
+              'Schedule time off',
+              'Set service areas',
+            ].map(
+              (t) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.check_circle_rounded,
+                      color: AppColors.worker,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(t, style: const TextStyle(fontSize: 14)),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Got it'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
+  String _formatDate(DateTime date) {
+    final diff = DateTime.now().difference(date);
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    if (diff.inDays < 7) return '${diff.inDays}d ago';
+    return '${date.day}/${date.month}/${date.year}';
   }
 
   String _getTimeGreeting() {
@@ -1510,52 +1932,102 @@ class _WorkerLandingPageState extends State<WorkerLandingPage> {
     if (hour < 17) return 'afternoon';
     return 'evening';
   }
+}
 
-  void _showAvailabilityDialog() {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          title: Text('Update Availability'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text('This feature is coming soon! You\'ll be able to:'),
-              SizedBox(height: 16),
-              _buildFeatureItem('Set working hours'),
-              _buildFeatureItem('Mark availability for urgent jobs'),
-              _buildFeatureItem('Schedule time off'),
-              _buildFeatureItem('Set service areas'),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: Text('Got it'),
+// ─────────────────────────────────────────────────────────────────────────────
+// Worker hero button
+// ─────────────────────────────────────────────────────────────────────────────
+class _WorkerHeroButton extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  const _WorkerHeroButton({
+    required this.label,
+    required this.icon,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: AppColors.border, width: 1.5),
+          boxShadow: const [
+            BoxShadow(
+              color: AppColors.shadow,
+              offset: Offset(2, 2),
+              blurRadius: 0,
             ),
           ],
-        );
-      },
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 18, color: AppColors.worker),
+            const SizedBox(width: 7),
+            Text(
+              label,
+              style: const TextStyle(
+                color: AppColors.worker,
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
+}
 
-  Widget _buildFeatureItem(String text) {
-    return Padding(
-      padding: EdgeInsets.only(bottom: 8),
-      child: Row(
-        children: [
-          Icon(Icons.check_circle, color: Colors.green, size: 16),
-          SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              text,
-              style: TextStyle(fontSize: 14),
+// ─────────────────────────────────────────────────────────────────────────────
+// Small action button inside job cards
+// ─────────────────────────────────────────────────────────────────────────────
+class _SmallButton extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _SmallButton({
+    required this.label,
+    required this.icon,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(7),
+          border: Border.all(color: color.withValues(alpha: 0.4), width: 1.5),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 14, color: color),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: color,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

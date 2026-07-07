@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../../../core/services/stripe_service.dart';
 import '../../../../data/models/user_model.dart';
 import '../../../../data/models/job_model.dart';
 import '../../../../data/models/location_model.dart';
@@ -13,11 +14,14 @@ import '../../../location/presentation/pages/location_picker_screen.dart';
 import '../../../location/presentation/pages/workers_map_screen.dart';
 import '../../../reviews/presentation/submit_review_screen.dart';
 import 'customer_jobs_list_page.dart';
+import 'create_job_screen.dart';
 import '../../../../data/models/worker_model.dart';
+import '../../../../data/models/bid_model.dart';
+import '../../../../core/theme/app_colors.dart';
+import '../../../../shared/widgets/wc_components.dart';
 
 class CustomerLandingPage extends StatefulWidget {
   final UserModel user;
-
   const CustomerLandingPage({super.key, required this.user});
 
   @override
@@ -28,7 +32,7 @@ class _CustomerLandingPageState extends State<CustomerLandingPage> {
   final AuthRepository _authRepository = AuthRepository();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final LocationService _locationService = LocationService();
-  
+
   LocationModel? _currentLocation;
   bool _isLoadingLocation = false;
 
@@ -40,26 +44,14 @@ class _CustomerLandingPageState extends State<CustomerLandingPage> {
 
   Future<void> _loadCurrentLocation() async {
     if (!mounted) return;
-    
-    setState(() {
-      _isLoadingLocation = true;
-    });
-    
+    setState(() => _isLoadingLocation = true);
     final result = await _locationService.getCurrentLocation();
-    
     if (!mounted) return;
-    
     if (result.isSuccess && result.data != null) {
-      setState(() {
-        _currentLocation = result.data;
-      });
+      setState(() => _currentLocation = result.data);
     }
-    
     if (!mounted) return;
-    
-    setState(() {
-      _isLoadingLocation = false;
-    });
+    setState(() => _isLoadingLocation = false);
   }
 
   Future<void> _selectLocationOnMap() async {
@@ -68,87 +60,16 @@ class _CustomerLandingPageState extends State<CustomerLandingPage> {
       initialLocation: _currentLocation,
       title: 'Select Your Location',
     );
-    
     if (!mounted) return;
-    
     if (selectedLocation != null) {
-      setState(() {
-        _currentLocation = selectedLocation;
-      });
+      setState(() => _currentLocation = selectedLocation);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Location updated: ${selectedLocation.address ?? "Location set"}'),
-          backgroundColor: Colors.green,
+          backgroundColor: AppColors.success,
         ),
       );
     }
-  }
-
-  Future<void> _createJobRequest({
-    required String serviceType,
-    required String description,
-    required String address,
-    required String budgetInput,
-    required LocationModel location,
-  }) async {
-    final trimmedService = serviceType.trim();
-    final trimmedDescription = description.trim();
-    final trimmedAddress = address.trim();
-    final budget = budgetInput.trim().isEmpty ? null : double.tryParse(budgetInput.trim());
-
-    if (trimmedService.isEmpty) {
-      throw Exception('Please select a service');
-    }
-
-    if (trimmedDescription.isEmpty) {
-      throw Exception('Please describe the job');
-    }
-
-    // Allow creating a job with just a picked map location (coordinates).
-    // If no textual address was provided, try to reverse-geocode the picked location
-    // to provide a friendly address, but do not block creation if geocoding fails.
-    String finalAddress = trimmedAddress;
-    if (finalAddress.isEmpty) {
-      if (location.address != null && location.address!.isNotEmpty) {
-        finalAddress = location.address!;
-      } else {
-        try {
-          final geoResult = await _locationService.getAddressFromCoordinates(
-            location.latitude,
-            location.longitude,
-          );
-          if (geoResult.isSuccess && geoResult.data != null && geoResult.data!.address != null) {
-            finalAddress = geoResult.data!.address!;
-          }
-        } catch (_) {
-          // ignore geocoding failures — address is optional when map coordinates are provided
-        }
-      }
-    }
-
-    if (budgetInput.trim().isNotEmpty && budget == null) {
-      throw Exception('Please enter a valid budget');
-    }
-
-    final job = JobModel(
-      id: '',
-      customerId: widget.user.id,
-      workerId: null,
-      serviceType: trimmedService,
-      description: trimmedDescription,
-      location: GeoPoint(location.latitude, location.longitude),
-      address: finalAddress.isNotEmpty ? finalAddress : (location.address ?? ''),
-      status: AppConstants.jobStatusRequested,
-      agreedPrice: budget,
-      imageUrls: const [],
-      hasReview: false,
-      createdAt: DateTime.now(),
-      acceptedAt: null,
-      completedAt: null,
-      updatedAt: DateTime.now(),
-    );
-
-    await _firestore.collection(AppConstants.jobsCollection).add(job.toFirestore());
   }
 
   Future<void> _cancelJobRequest(String jobId) async {
@@ -158,721 +79,294 @@ class _CustomerLandingPageState extends State<CustomerLandingPage> {
         'cancelledAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
       });
-
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Job request cancelled'),
-          backgroundColor: Colors.orange,
-        ),
+        const SnackBar(content: Text('Job request cancelled'), backgroundColor: AppColors.warning),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to cancel job: $e'),
-          backgroundColor: Colors.red,
-        ),
+        SnackBar(content: Text('Failed to cancel job: $e'), backgroundColor: AppColors.error),
       );
     }
   }
 
   Future<void> _showCreateJobRequestDialog({String? presetService}) async {
-    await showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) => _CreateJobDialog(
-        parentContext: context,
-        currentLocation: _currentLocation,
-        presetService: presetService,
-        onCreateJobRequest: _createJobRequest,
-      ),
+    await CreateJobScreen.show(
+      context,
+      customerId:      widget.user.id,
+      initialLocation: _currentLocation,
+      presetService:   presetService,
     );
   }
 
   final List<Map<String, dynamic>> _services = [
-    {
-      'title': 'Plumbing',
-      'icon': Icons.plumbing,
-      'color': Colors.blue,
-      'description': 'Fix leaks, install fixtures'
-    },
-    {
-      'title': 'Electrical',
-      'icon': Icons.electrical_services,
-      'color': Colors.amber,
-      'description': 'Wiring, repairs, installations'
-    },
-    {
-      'title': 'Carpentry',
-      'icon': Icons.carpenter,
-      'color': Colors.brown,
-      'description': 'Furniture, repairs, installations'
-    },
-    {
-      'title': 'Cleaning',
-      'icon': Icons.cleaning_services,
-      'color': Colors.green,
-      'description': 'Home and office cleaning'
-    },
-    {
-      'title': 'Painting',
-      'icon': Icons.format_paint,
-      'color': Colors.purple,
-      'description': 'Interior and exterior painting'
-    },
-    {
-      'title': 'HVAC',
-      'icon': Icons.thermostat,
-      'color': Colors.red,
-      'description': 'Heating and cooling services'
-    },
+    {'title': 'Plumbing',   'icon': Icons.plumbing,             'color': AppColors.info,    'description': 'Fix leaks, install fixtures'},
+    {'title': 'Electrical', 'icon': Icons.electrical_services,  'color': Color(0xFFD97706), 'description': 'Wiring, repairs, installations'},
+    {'title': 'Carpentry',  'icon': Icons.carpenter,            'color': Color(0xFF92400E), 'description': 'Furniture, repairs, installations'},
+    {'title': 'Cleaning',   'icon': Icons.cleaning_services,    'color': AppColors.success, 'description': 'Home and office cleaning'},
+    {'title': 'Painting',   'icon': Icons.format_paint,         'color': AppColors.admin,   'description': 'Interior and exterior painting'},
+    {'title': 'HVAC',       'icon': Icons.thermostat,           'color': AppColors.error,   'description': 'Heating and cooling services'},
   ];
 
-  Future<void> _signOut() async {
-    await _authRepository.signOut();
-  }
+  Future<void> _signOut() async => _authRepository.signOut();
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[50],
-      appBar: AppBar(
-        elevation: 0,
-        backgroundColor: Colors.orange,
-        foregroundColor: Colors.white,
-        title: Row(
+      backgroundColor: AppColors.background,
+      appBar: _buildAppBar(),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.work_outline, size: 28),
-            SizedBox(width: 8),
-            Text(
-              'WorkConnect',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 22,
+            _buildHeroCard(),
+            const SizedBox(height: 16),
+            _buildLocationCard(),
+            const SizedBox(height: 24),
+            _buildActiveRequestsSection(),
+            const SizedBox(height: 20),
+            _buildRequestHistorySection(),
+            const SizedBox(height: 28),
+            _buildServicesSection(),
+            const SizedBox(height: 28),
+            _buildQuickActionsSection(),
+            const SizedBox(height: 28),
+            _buildTrustSection(),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  PreferredSizeWidget _buildAppBar() {
+    return AppBar(
+      backgroundColor: AppColors.surface,
+      foregroundColor: AppColors.textPrimary,
+      elevation: 0,
+      scrolledUnderElevation: 0,
+      title: Row(
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: AppColors.primary,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppColors.border, width: 1.5),
+            ),
+            child: const Icon(Icons.handyman_rounded, color: Colors.white, size: 18),
+          ),
+          const SizedBox(width: 10),
+          const Text(
+            'WorkConnect',
+            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, letterSpacing: -0.3),
+          ),
+        ],
+      ),
+      actions: [
+        PopupMenuButton(
+          icon: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: AppColors.primaryLight,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppColors.border, width: 1.5),
+            ),
+            child: Center(
+              child: Text(
+                widget.user.name.isNotEmpty ? widget.user.name[0].toUpperCase() : 'U',
+                style: const TextStyle(
+                  color: AppColors.primary,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+          ),
+          onSelected: (value) { if (value == 'logout') _signOut(); },
+          itemBuilder: (context) => [
+            PopupMenuItem(
+              enabled: false,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(widget.user.name, style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                  Text(widget.user.email, style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                  const SizedBox(height: 4),
+                  const Divider(height: 1),
+                ],
+              ),
+            ),
+            const PopupMenuItem(
+              value: 'logout',
+              child: Row(
+                children: [
+                  Icon(Icons.logout_rounded, color: AppColors.error, size: 18),
+                  SizedBox(width: 8),
+                  Text('Sign Out', style: TextStyle(fontWeight: FontWeight.w600)),
+                ],
               ),
             ),
           ],
         ),
-        actions: [
-          PopupMenuButton(
-            icon: CircleAvatar(
-              backgroundColor: Colors.white,
-              child: Text(
-                widget.user.name.isNotEmpty ? widget.user.name[0].toUpperCase() : 'U',
-                style: TextStyle(
-                  color: Colors.orange,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-            onSelected: (value) {
-              if (value == 'logout') {
-                _signOut();
-              }
-            },
-            itemBuilder: (context) => [
-              PopupMenuItem(
-                enabled: false,
+        const SizedBox(width: 8),
+      ],
+      bottom: PreferredSize(
+        preferredSize: const Size.fromHeight(2),
+        child: Container(height: 2, color: AppColors.border),
+      ),
+    );
+  }
+
+  // ── Hero ─────────────────────────────────────────────────────────────
+  Widget _buildHeroCard() {
+    return WcCard(
+      backgroundColor: AppColors.primary,
+      borderColor: AppColors.border,
+      padding: const EdgeInsets.all(22),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      widget.user.name,
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black,
+                      'Welcome back,\n${widget.user.name.split(' ')[0]}.',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 24,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.5,
+                        height: 1.2,
                       ),
                     ),
-                    Text(
-                      widget.user.email,
-                      style: TextStyle(
-                        color: Colors.grey[600],
-                        fontSize: 12,
-                      ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Find skilled professionals for any job.',
+                      style: TextStyle(color: Colors.white70, fontSize: 14),
                     ),
-                    Divider(),
                   ],
                 ),
               ),
-              PopupMenuItem(
-                value: 'logout',
-                child: Row(
-                  children: [
-                    Icon(Icons.logout, color: Colors.red, size: 20),
-                    SizedBox(width: 8),
-                    Text('Sign Out'),
-                  ],
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.3), width: 1),
+                ),
+                child: const Icon(Icons.search_rounded, color: Colors.white, size: 28),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Row(
+            children: [
+              Expanded(
+                child: _HeroButton(
+                  label: 'Browse Workers',
+                  icon: Icons.people_outline_rounded,
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => WorkerListScreen())),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _HeroButton(
+                  label: 'Map View',
+                  icon: Icons.map_outlined,
+                  onTap: () => Navigator.push(context, MaterialPageRoute(
+                    builder: (_) => WorkersMapScreen(initialLocation: _currentLocation),
+                  )),
                 ),
               ),
             ],
           ),
-          SizedBox(width: 8),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Welcome Section
-            Container(
-              width: double.infinity,
-              padding: EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Colors.orange.shade400, Colors.orange.shade600],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.orange.withOpacity(0.3),
-                    blurRadius: 10,
-                    offset: Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Welcome back, ${widget.user.name.split(' ')[0]}! 👋',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  SizedBox(height: 8),
-                  Text(
-                    'Find skilled professionals for any job',
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.9),
-                      fontSize: 16,
-                    ),
-                  ),
-                  SizedBox(height: 20),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => WorkerListScreen(),
-                              ),
-                            );
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.white,
-                            foregroundColor: Colors.orange,
-                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(25),
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.list, size: 20),
-                              SizedBox(width: 8),
-                              Text(
-                                'List View',
-                                style: TextStyle(fontWeight: FontWeight.bold),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      SizedBox(width: 12),
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => WorkersMapScreen(
-                                  initialLocation: _currentLocation,
-                                ),
-                              ),
-                            );
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.white,
-                            foregroundColor: Colors.orange,
-                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(25),
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.map, size: 20),
-                              SizedBox(width: 8),
-                              Text(
-                                'Map View',
-                                style: TextStyle(fontWeight: FontWeight.bold),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-
-            SizedBox(height: 16),
-
-            // Current Location Card
-            _buildLocationCard(),
-
-            const SizedBox(height: 20),
-
-            const SizedBox(height: 0),
-            _buildActiveRequestsSection(),
-            const SizedBox(height: 20),
-            _buildRequestHistorySection(),
-
-            SizedBox(height: 32),
-
-            // Popular Services Section
-            Text(
-              'Popular Services',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: Colors.grey[800],
-              ),
-            ),
-            SizedBox(height: 16),
-
-            // Services Grid
-            GridView.builder(
-              shrinkWrap: true,
-              physics: NeverScrollableScrollPhysics(),
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                crossAxisSpacing: 16,
-                mainAxisSpacing: 16,
-                childAspectRatio: 1.1,
-              ),
-              itemCount: _services.length,
-              itemBuilder: (context, index) {
-                final service = _services[index];
-                return GestureDetector(
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => WorkerListScreen(
-                          serviceFilter: service['title'],
-                        ),
-                      ),
-                    );
-                  },
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.05),
-                          blurRadius: 10,
-                          offset: Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Container(
-                          padding: EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: service['color'].withOpacity(0.1),
-                            shape: BoxShape.circle,
-                          ),
-                          child: Icon(
-                            service['icon'],
-                            size: 32,
-                            color: service['color'],
-                          ),
-                        ),
-                        SizedBox(height: 12),
-                        Text(
-                          service['title'],
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                            color: Colors.grey[800],
-                          ),
-                        ),
-                        SizedBox(height: 4),
-                        Text(
-                          service['description'],
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-
-            SizedBox(height: 32),
-
-            // Quick Actions Section
-            Text(
-              'Quick Actions',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: Colors.grey[800],
-              ),
-            ),
-            SizedBox(height: 16),
-
-            // Quick Action Cards
-            Row(
-              children: [
-                Expanded(
-                  child: _buildQuickActionCard(
-                    'Emergency Service',
-                    Icons.emergency,
-                    Colors.red,
-                    'Get immediate help',
-                    () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => WorkerListScreen(
-                            emergencyOnly: true,
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                SizedBox(width: 16),
-                Expanded(
-                  child: _buildQuickActionCard(
-                    'Create Job Request',
-                    Icons.post_add,
-                    Colors.blue,
-                    'Post what you need done',
-                    () {
-                      _showCreateJobRequestDialog();
-                    },
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 16),
-
-            // Quick Job Tabs Shortcuts (visible on home screen)
-            Card(
-              elevation: 0,
-              color: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    TextButton.icon(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (c) => CustomerJobsListPage(
-                              title: 'All Jobs',
-                              customerId: widget.user.id,
-                              scope: CustomerJobsScope.all,
-                            ),
-                          ),
-                        );
-                      },
-                      icon: const Icon(Icons.list, color: Colors.orange),
-                      label: const Text('All'),
-                    ),
-                    TextButton.icon(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (c) => CustomerJobsListPage(
-                              title: 'Pending Jobs',
-                              customerId: widget.user.id,
-                              scope: CustomerJobsScope.pending,
-                            ),
-                          ),
-                        );
-                      },
-                      icon: const Icon(Icons.schedule, color: Colors.orange),
-                      label: const Text('Pending'),
-                    ),
-                    TextButton.icon(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (c) => CustomerJobsListPage(
-                              title: 'Completed Jobs',
-                              customerId: widget.user.id,
-                              scope: CustomerJobsScope.completed,
-                            ),
-                          ),
-                        );
-                      },
-                      icon: const Icon(Icons.check_circle, color: Colors.orange),
-                      label: const Text('Completed'),
-                    ),
-                    TextButton.icon(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (c) => CustomerJobsListPage(
-                              title: 'Job History',
-                              customerId: widget.user.id,
-                              scope: CustomerJobsScope.history,
-                            ),
-                          ),
-                        );
-                      },
-                      icon: const Icon(Icons.history, color: Colors.orange),
-                      label: const Text('History'),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            SizedBox(height: 32),
-
-            // Why Choose Us Section
-            Container(
-              width: double.infinity,
-              padding: EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Colors.blue.shade50,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Why Choose WorkConnect?',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey[800],
-                    ),
-                  ),
-                  SizedBox(height: 16),
-                  _buildFeatureItem(
-                    Icons.verified,
-                    'Verified Professionals',
-                    'All workers are background checked',
-                  ),
-                  _buildFeatureItem(
-                    Icons.star,
-                    'Rated & Reviewed',
-                    'Choose based on real customer reviews',
-                  ),
-                  _buildFeatureItem(
-                    Icons.support_agent,
-                    '24/7 Support',
-                    'Get help whenever you need it',
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 
-  Widget _buildQuickActionCard(
-    String title,
-    IconData icon,
-    Color color,
-    String subtitle,
-    VoidCallback onTap,
-  ) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 8,
-              offset: Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Column(
-          children: [
-            Icon(icon, color: color, size: 28),
-            SizedBox(height: 8),
-            Text(
-              title,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
-              ),
-            ),
-            SizedBox(height: 4),
-            Text(
-              subtitle,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.grey[600],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
+  // ── Location Card ─────────────────────────────────────────────────────
   Widget _buildLocationCard() {
-    return Container(
-      width: double.infinity,
-      padding: EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade200),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 8,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
+    return WcCard(
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
               Container(
-                padding: EdgeInsets.all(10),
+                width: 36,
+                height: 36,
                 decoration: BoxDecoration(
-                  color: Colors.green.shade50,
+                  color: AppColors.successLight,
                   borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppColors.success.withValues(alpha: 0.3), width: 1),
                 ),
-                child: Icon(
-                  Icons.location_on,
-                  color: Colors.green,
-                  size: 24,
-                ),
+                child: const Icon(Icons.location_on_rounded, color: AppColors.success, size: 18),
               ),
-              SizedBox(width: 12),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
+                    const Text(
                       'Your Location',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                        color: Colors.grey[800],
-                      ),
+                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: AppColors.textPrimary),
                     ),
-                    SizedBox(height: 4),
+                    const SizedBox(height: 3),
                     if (_isLoadingLocation)
-                      Row(
-                        children: [
-                          SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor: AlwaysStoppedAnimation<Color>(Colors.green),
-                            ),
-                          ),
-                          SizedBox(width: 8),
-                          Text(
-                            'Getting location...',
-                            style: TextStyle(
-                              color: Colors.grey[600],
-                              fontSize: 14,
-                            ),
-                          ),
-                        ],
-                      )
+                      Row(children: [
+                        const SizedBox(
+                          width: 12, height: 12,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.success),
+                        ),
+                        const SizedBox(width: 8),
+                        const Text('Detecting location...', style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
+                      ])
                     else if (_currentLocation != null)
                       Text(
-                        _currentLocation!.address ?? 
-                          '${_currentLocation!.latitude.toStringAsFixed(4)}, ${_currentLocation!.longitude.toStringAsFixed(4)}',
-                        style: TextStyle(
-                          color: Colors.grey[600],
-                          fontSize: 14,
-                        ),
-                        maxLines: 2,
+                        _currentLocation!.address ??
+                            '${_currentLocation!.latitude.toStringAsFixed(4)}, ${_currentLocation!.longitude.toStringAsFixed(4)}',
+                        style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       )
                     else
-                      Text(
-                        'Location not set',
-                        style: TextStyle(
-                          color: Colors.grey[500],
-                          fontSize: 14,
-                        ),
-                      ),
+                      const Text('Location not set', style: TextStyle(color: AppColors.textMuted, fontSize: 13)),
                   ],
                 ),
               ),
             ],
           ),
-          SizedBox(height: 16),
+          const SizedBox(height: 14),
           Row(
             children: [
               Expanded(
-                child: OutlinedButton.icon(
+                child: WcOutlinedButton(
+                  label: 'Use Current',
+                  icon: Icons.my_location_rounded,
+                  borderColor: AppColors.success,
+                  textColor: AppColors.success,
                   onPressed: _loadCurrentLocation,
-                  icon: Icon(Icons.my_location, size: 18),
-                  label: Text('Use Current'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.green,
-                    side: BorderSide(color: Colors.green),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
                 ),
               ),
-              SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
-                child: ElevatedButton.icon(
+                child: WcPrimaryButton(
+                  label: 'Select on Map',
+                  icon: Icons.map_outlined,
+                  backgroundColor: AppColors.success,
                   onPressed: _selectLocationOnMap,
-                  icon: Icon(Icons.map, size: 18),
-                  label: Text('Select on Map'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
                 ),
               ),
             ],
@@ -882,6 +376,229 @@ class _CustomerLandingPageState extends State<CustomerLandingPage> {
     );
   }
 
+  // ── Services Grid ─────────────────────────────────────────────────────
+  Widget _buildServicesSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        WcSectionHeader(
+          title: 'Popular Services',
+          subtitle: 'Tap a category to browse available workers',
+          trailing: TextButton(
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => WorkerListScreen())),
+            child: const Text('View All', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+          ),
+        ),
+        const SizedBox(height: 14),
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            crossAxisSpacing: 12,
+            mainAxisSpacing: 12,
+            childAspectRatio: 1.15,
+          ),
+          itemCount: _services.length,
+          itemBuilder: (_, i) {
+            final s = _services[i];
+            return WcCard(
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => WorkerListScreen(serviceFilter: s['title'] as String)),
+              ),
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: (s['color'] as Color).withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: (s['color'] as Color).withValues(alpha: 0.3), width: 1),
+                    ),
+                    child: Icon(s['icon'] as IconData, size: 24, color: s['color'] as Color),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    s['title'] as String,
+                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: AppColors.textPrimary),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    s['description'] as String,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  // ── Quick Actions ─────────────────────────────────────────────────────
+  Widget _buildQuickActionsSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const WcSectionHeader(title: 'Quick Actions'),
+        const SizedBox(height: 14),
+        Row(
+          children: [
+            Expanded(
+              child: WcCard(
+                onTap: () => Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => WorkerListScreen(emergencyOnly: true),
+                )),
+                padding: const EdgeInsets.all(16),
+                borderColor: AppColors.error,
+                child: Column(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: AppColors.errorLight,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: AppColors.error.withValues(alpha: 0.3), width: 1),
+                      ),
+                      child: const Icon(Icons.emergency_rounded, color: AppColors.error, size: 22),
+                    ),
+                    const SizedBox(height: 10),
+                    const Text('Emergency', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.textPrimary)),
+                    const SizedBox(height: 3),
+                    const Text('Immediate help', style: TextStyle(fontSize: 11, color: AppColors.textSecondary), textAlign: TextAlign.center),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: WcCard(
+                onTap: _showCreateJobRequestDialog,
+                padding: const EdgeInsets.all(16),
+                borderColor: AppColors.info,
+                child: Column(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: AppColors.infoLight,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: AppColors.info.withValues(alpha: 0.3), width: 1),
+                      ),
+                      child: const Icon(Icons.post_add_rounded, color: AppColors.info, size: 22),
+                    ),
+                    const SizedBox(height: 10),
+                    const Text('Post a Job', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.textPrimary)),
+                    const SizedBox(height: 3),
+                    const Text('Describe your need', style: TextStyle(fontSize: 11, color: AppColors.textSecondary), textAlign: TextAlign.center),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        // Job filter shortcuts
+        WcCard(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          hasShadow: false,
+          borderColor: AppColors.borderLight,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _buildJobTabShortcut('All',       Icons.list_rounded,        CustomerJobsScope.all),
+              _buildJobTabShortcut('Pending',   Icons.schedule_rounded,    CustomerJobsScope.pending),
+              _buildJobTabShortcut('Completed', Icons.check_circle_outline,CustomerJobsScope.completed),
+              _buildJobTabShortcut('History',   Icons.history_rounded,     CustomerJobsScope.history),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildJobTabShortcut(String label, IconData icon, CustomerJobsScope scope) {
+    return TextButton(
+      onPressed: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => CustomerJobsListPage(
+            title: '$label Jobs',
+            customerId: widget.user.id,
+            scope: scope,
+          ),
+        ),
+      ),
+      style: TextButton.styleFrom(
+        foregroundColor: AppColors.primary,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 18),
+          const SizedBox(height: 3),
+          Text(label, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
+  }
+
+  // ── Trust Section ─────────────────────────────────────────────────────
+  Widget _buildTrustSection() {
+    return WcCard(
+      backgroundColor: AppColors.infoLight,
+      borderColor: AppColors.info.withValues(alpha: 0.4),
+      hasShadow: false,
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Why WorkConnect?',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.textPrimary),
+          ),
+          const SizedBox(height: 14),
+          _buildTrustRow(Icons.verified_rounded,     'Verified Professionals',  'All workers are background checked'),
+          _buildTrustRow(Icons.star_rounded,          'Rated & Reviewed',        'Choose based on real customer reviews'),
+          _buildTrustRow(Icons.support_agent_rounded, '24/7 Support',            'Get help whenever you need it'),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTrustRow(IconData icon, String title, String subtitle) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        children: [
+          Icon(icon, color: AppColors.info, size: 20),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.textPrimary)),
+                Text(subtitle, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Active Requests ───────────────────────────────────────────────────
   Widget _buildActiveRequestsSection() {
     return StreamBuilder<QuerySnapshot>(
       stream: _firestore
@@ -890,451 +607,208 @@ class _CustomerLandingPageState extends State<CustomerLandingPage> {
           .snapshots(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Card(
-            child: Padding(
-              padding: EdgeInsets.all(24),
-              child: Center(
-                child: CircularProgressIndicator(),
-              ),
+          return WcCard(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              children: [
+                const WcSkeleton(width: double.infinity, height: 20),
+                const SizedBox(height: 12),
+                WcSkeleton(width: double.infinity, height: 100, borderRadius: BorderRadius.circular(10)),
+              ],
             ),
           );
         }
 
         if (snapshot.hasError) {
-          return Card(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Your Requests',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text('Could not load your requests right now.'),
-                ],
-              ),
+          return WcCard(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: const [
+                Text('Your Requests', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+                SizedBox(height: 8),
+                Text('Could not load your requests right now.', style: TextStyle(color: AppColors.textSecondary)),
+              ],
             ),
           );
         }
 
         final jobs = snapshot.data?.docs
                 .map((doc) => JobModel.fromFirestore(doc))
-            .where((job) =>
-              job.status == AppConstants.jobStatusRequested ||
-              job.status == AppConstants.jobStatusAccepted ||
-              job.status == AppConstants.jobStatusInProgress)
+                .where((job) =>
+                    job.status == AppConstants.jobStatusRequested ||
+                    job.status == AppConstants.jobStatusAccepted ||
+                    job.status == AppConstants.jobStatusInProgress)
                 .toList() ??
             [];
-
         jobs.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-
         final trackedJobs = jobs.take(5).toList();
 
-        return Card(
-          elevation: 2,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Text(
-                      'Your Requests',
-                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: Colors.grey[800],
-                      ),
-                    ),
-                    const Spacer(),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.orange.withOpacity(0.12),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        '${trackedJobs.length} active',
-                        style: const TextStyle(
-                          color: Colors.orange,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  'Track every active request until a worker accepts it. You can create another request at any time.',
-                  style: TextStyle(
-                    color: Colors.grey,
-                    fontSize: 13,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                if (trackedJobs.isEmpty)
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(18),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade50,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: Colors.grey.shade200),
-                    ),
-                    child: Column(
-                      children: [
-                        Icon(
-                          Icons.receipt_long_outlined,
-                          size: 44,
-                          color: Colors.grey.shade400,
-                        ),
-                        const SizedBox(height: 10),
-                        Text(
-                          'No active requests yet',
-                          style: TextStyle(
-                            color: Colors.grey.shade700,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          'Create a job request and it will appear here until a worker accepts it.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: Colors.grey.shade600,
-                            fontSize: 13,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        ElevatedButton.icon(
-                          onPressed: _showCreateJobRequestDialog,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.orange,
-                            foregroundColor: Colors.white,
-                          ),
-                          icon: const Icon(Icons.post_add),
-                          label: const Text('Create Request'),
-                        ),
-                      ],
-                    ),
-                  )
-                else
-                  Column(
-                    children: [
-                      ...trackedJobs.map((job) {
-                      final progressIndex = _getJobProgressIndex(job.status);
-                      final status = _getJobStatusLabel(job.status);
-                      final statusColor = _getJobStatusColor(job.status);
-
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 12),
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: Colors.grey.shade200),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.04),
-                              blurRadius: 8,
-                              offset: const Offset(0, 2),
-                            ),
-                          ],
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        job.serviceType,
-                                        style: const TextStyle(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        job.address,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          color: Colors.grey.shade600,
-                                          fontSize: 13,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                                  decoration: BoxDecoration(
-                                    color: statusColor.withOpacity(0.12),
-                                    borderRadius: BorderRadius.circular(20),
-                                  ),
-                                  child: Text(
-                                    status,
-                                    style: TextStyle(
-                                      color: statusColor,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            _buildJobProgressStepper(progressIndex),
-                            const SizedBox(height: 12),
-                            Text(
-                              job.description,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 13,
-                                height: 1.4,
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            // Live map preview for this job - shows worker location in realtime when available
-                            SizedBox(
-                              height: 140,
-                              child: JobLiveMap(
-                                jobId: job.id,
-                                initialLocation: LocationModel.fromGeoPoint(job.location, metadata: {'address': job.address}),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            Row(
-                              children: [
-                                if (job.agreedPrice != null)
-                                  Text(
-                                    '\$${job.agreedPrice!.toStringAsFixed(2)}',
-                                    style: const TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.orange,
-                                    ),
-                                  ),
-                                const Spacer(),
-                                if (job.status != AppConstants.jobStatusCompleted && job.status != AppConstants.jobStatusCancelled)
-                                  TextButton.icon(
-                                    onPressed: () async {
-                                      final ok = await showDialog<bool>(
-                                        context: context,
-                                        builder: (dialogContext) => AlertDialog(
-                                          title: const Text('Cancel job request'),
-                                          content: const Text('Do you want to cancel this job request?'),
-                                          actions: [
-                                            TextButton(
-                                              onPressed: () => Navigator.pop(dialogContext, false),
-                                              child: const Text('No'),
-                                            ),
-                                            TextButton(
-                                              onPressed: () => Navigator.pop(dialogContext, true),
-                                              child: const Text('Yes'),
-                                            ),
-                                          ],
-                                        ),
-                                      );
-
-                                      if (ok == true) {
-                                        await _cancelJobRequest(job.id);
-                                      }
-                                    },
-                                    icon: const Icon(Icons.cancel_outlined, color: Colors.red, size: 18),
-                                    label: const Text('Cancel'),
-                                    style: TextButton.styleFrom(foregroundColor: Colors.red),
-                                  ),
-                                Text(
-                                  _formatJobTime(job.createdAt),
-                                  style: TextStyle(
-                                    color: Colors.grey.shade500,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      );
-                    }),
-                    const SizedBox(height: 4),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: _showCreateJobRequestDialog,
-                        icon: const Icon(Icons.post_add),
-                        label: const Text('Create another request'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.orange,
-                          side: const BorderSide(color: Colors.orange),
-                        ),
-                      ),
-                    ),
-                    ],
-                  ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  String _formatJobTime(DateTime dateTime) {
-    final difference = DateTime.now().difference(dateTime);
-    if (difference.inMinutes < 60) {
-      return '${difference.inMinutes}m ago';
-    }
-    if (difference.inHours < 24) {
-      return '${difference.inHours}h ago';
-    }
-    return '${dateTime.day}/${dateTime.month}/${dateTime.year}';
-  }
-
-  int _getJobProgressIndex(String status) {
-    switch (status) {
-      case AppConstants.jobStatusAccepted:
-        return 1;
-      case AppConstants.jobStatusInProgress:
-        return 2;
-      case AppConstants.jobStatusCompleted:
-        return 3;
-      case AppConstants.jobStatusRequested:
-      default:
-        return 0;
-    }
-  }
-
-  String _getJobStatusLabel(String status) {
-    switch (status) {
-      case AppConstants.jobStatusAccepted:
-        return 'Accepted by a worker';
-      case AppConstants.jobStatusInProgress:
-        return 'Worker on the way';
-      case AppConstants.jobStatusCompleted:
-        return 'Completed';
-      case AppConstants.jobStatusRequested:
-      default:
-        return 'Waiting for a worker';
-    }
-  }
-
-  Color _getJobStatusColor(String status) {
-    switch (status) {
-      case AppConstants.jobStatusAccepted:
-        return Colors.green;
-      case AppConstants.jobStatusInProgress:
-        return Colors.blue;
-      case AppConstants.jobStatusCompleted:
-        return Colors.purple;
-      case AppConstants.jobStatusRequested:
-      default:
-        return Colors.orange;
-    }
-  }
-
-  Widget _buildJobProgressStepper(int currentStep) {
-    const steps = [
-      ('Requested', Icons.send_outlined),
-      ('Accepted', Icons.check_circle_outline),
-      ('Worker on the way', Icons.directions_car_outlined),
-      ('Completed', Icons.verified_outlined),
-    ];
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return Row(
-          children: List.generate(steps.length, (index) {
-            final isActive = index <= currentStep;
-            final isLast = index == steps.length - 1;
-            final color = isActive ? _getJobStatusColor(_statusForStep(index)) : Colors.grey.shade300;
-
-            return Expanded(
-              child: Row(
+        return WcCard(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
                 children: [
-                  Expanded(
-                    child: Column(
-                      children: [
-                        AnimatedContainer(
-                          duration: const Duration(milliseconds: 350),
-                          curve: Curves.easeOut,
-                          width: 30,
-                          height: 30,
-                          decoration: BoxDecoration(
-                            color: isActive ? color : Colors.grey.shade200,
-                            shape: BoxShape.circle,
-                            boxShadow: isActive
-                                ? [
-                                    BoxShadow(
-                                      color: color.withOpacity(0.25),
-                                      blurRadius: 8,
-                                      offset: const Offset(0, 2),
-                                    ),
-                                  ]
-                                : null,
-                          ),
-                          child: AnimatedSwitcher(
-                            duration: const Duration(milliseconds: 250),
-                            child: Icon(
-                              steps[index].$2,
-                              key: ValueKey('${steps[index].$1}-$isActive'),
-                              size: 16,
-                              color: isActive ? Colors.white : Colors.grey.shade500,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          steps[index].$1,
-                          textAlign: TextAlign.center,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 10,
-                            height: 1.2,
-                            fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
-                            color: isActive ? color : Colors.grey.shade500,
-                          ),
-                        ),
-                      ],
+                  const Expanded(
+                    child: Text(
+                      'Active Requests',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.textPrimary, letterSpacing: -0.3),
                     ),
                   ),
-                  if (!isLast)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 24),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 350),
-                        curve: Curves.easeOut,
-                        width: 18,
-                        height: 2,
-                        color: index < currentStep ? color : Colors.grey.shade300,
-                      ),
-                    ),
+                  WcStatusBadge(
+                    label: '${trackedJobs.length} active',
+                    color: AppColors.primary,
+                  ),
                 ],
               ),
-            );
-          }),
+              const SizedBox(height: 6),
+              const Text(
+                'Track every active request until a worker accepts it.',
+                style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+              ),
+              const SizedBox(height: 16),
+              if (trackedJobs.isEmpty)
+                WcEmptyState(
+                  icon: Icons.receipt_long_outlined,
+                  title: 'No active requests',
+                  subtitle: 'Create a job request and it will appear here.',
+                  action: WcPrimaryButton(
+                    label: 'Create Request',
+                    icon: Icons.post_add_rounded,
+                    onPressed: _showCreateJobRequestDialog,
+                  ),
+                )
+              else ...[
+                ...trackedJobs.map((job) => _buildActiveJobCard(job)),
+                const SizedBox(height: 8),
+                WcOutlinedButton(
+                  label: 'Create Another Request',
+                  icon: Icons.add_rounded,
+                  width: double.infinity,
+                  onPressed: _showCreateJobRequestDialog,
+                ),
+              ],
+            ],
+          ),
         );
       },
     );
   }
 
- 
+  Widget _buildActiveJobCard(JobModel job) {
+    final status = _getJobStatusLabel(job.status);
+    final statusColor = _getJobStatusColor(job.status);
+    final progressIndex = _getJobProgressIndex(job.status);
 
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.borderLight, width: 1.5),
+        boxShadow: const [BoxShadow(color: Color(0x0A000000), blurRadius: 4, offset: Offset(0, 2))],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(job.serviceType,
+                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                    const SizedBox(height: 3),
+                    Text(job.address,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: AppColors.textSecondary, fontSize: 13)),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              WcStatusBadge(label: status, color: statusColor),
+            ],
+          ),
+          const SizedBox(height: 12),
+          _buildJobProgressStepper(progressIndex),
+          const SizedBox(height: 12),
+          Text(job.description,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 13, color: AppColors.textSecondary, height: 1.4)),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 140,
+            child: JobLiveMap(
+              jobId: job.id,
+              initialLocation: LocationModel.fromGeoPoint(job.location, metadata: {'address': job.address}),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              if (job.agreedPrice != null)
+                Text(
+                  '\$${job.agreedPrice!.toStringAsFixed(2)}',
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.primary),
+                ),
+              const Spacer(),
+              if (job.status == AppConstants.jobStatusRequested)
+                TextButton.icon(
+                  onPressed: () => _showBidsModal(job),
+                  icon: const Icon(Icons.gavel_rounded, size: 16),
+                  label: const Text('View Bids', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.primary,
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              if (job.status != AppConstants.jobStatusCompleted &&
+                  job.status != AppConstants.jobStatusCancelled) ...[
+                const SizedBox(width: 8),
+                TextButton.icon(
+                  onPressed: () async {
+                    final ok = await showDialog<bool>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        title: const Text('Cancel Request'),
+                        content: const Text('Do you want to cancel this job request?'),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('No')),
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx, true),
+                            child: const Text('Yes', style: TextStyle(color: AppColors.error)),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (ok == true) await _cancelJobRequest(job.id);
+                  },
+                  icon: const Icon(Icons.cancel_outlined, color: AppColors.error, size: 16),
+                  label: const Text('Cancel', style: TextStyle(color: AppColors.error, fontSize: 13)),
+                  style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                ),
+              ],
+              const SizedBox(width: 8),
+              Text(
+                _formatJobTime(job.createdAt),
+                style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── History ───────────────────────────────────────────────────────────
   Widget _buildRequestHistorySection() {
     return StreamBuilder<QuerySnapshot>(
       stream: _firestore
@@ -1342,9 +816,7 @@ class _CustomerLandingPageState extends State<CustomerLandingPage> {
           .where('customerId', isEqualTo: widget.user.id)
           .snapshots(),
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const SizedBox.shrink();
-        }
+        if (snapshot.connectionState == ConnectionState.waiting) return const SizedBox.shrink();
 
         final historyJobs = snapshot.data?.docs
                 .map((doc) => JobModel.fromFirestore(doc))
@@ -1352,203 +824,330 @@ class _CustomerLandingPageState extends State<CustomerLandingPage> {
                 .toList() ??
             [];
 
-        if (historyJobs.isEmpty) {
-          return const SizedBox.shrink();
-        }
-
+        if (historyJobs.isEmpty) return const SizedBox.shrink();
         historyJobs.sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
-        return Card(
-          elevation: 2,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Text(
-                      'History',
-                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: Colors.grey[800],
+        return WcCard(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Completed Jobs',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.textPrimary, letterSpacing: -0.3),
+                    ),
+                  ),
+                  WcStatusBadge(label: '${historyJobs.length} done', color: AppColors.admin),
+                ],
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Completed requests — pay or leave a review.',
+                style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+              ),
+              const SizedBox(height: 16),
+              ...historyJobs.take(5).map((job) => _buildHistoryJobCard(job)),
+              if (historyJobs.length > 5) ...[
+                const SizedBox(height: 4),
+                WcOutlinedButton(
+                  label: 'View All ${historyJobs.length} Completed Jobs',
+                  icon: Icons.history_rounded,
+                  width: double.infinity,
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => CustomerJobsListPage(
+                        title: 'Completed Jobs',
+                        customerId: widget.user.id,
+                        scope: CustomerJobsScope.completed,
                       ),
                     ),
-                    const Spacer(),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.purple.withOpacity(0.12),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        '${historyJobs.length} completed',
-                        style: const TextStyle(
-                          color: Colors.purple,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  'Completed requests move here after the worker finishes the job.',
-                  style: TextStyle(
-                    color: Colors.grey,
-                    fontSize: 13,
                   ),
                 ),
-                const SizedBox(height: 16),
-                Column(
-                  children: historyJobs.take(3).map((job) {
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: Colors.grey.shade200),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              const Icon(Icons.verified_outlined, color: Colors.purple, size: 20),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  job.serviceType,
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                              Text(
-                                'Completed',
-                                style: TextStyle(
-                                  color: Colors.purple.shade700,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            job.address,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: Colors.grey.shade600,
-                              fontSize: 13,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            _formatJobTime(job.createdAt),
-                            style: TextStyle(
-                              color: Colors.grey.shade500,
-                              fontSize: 12,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          // Show review button for completed jobs that haven't been reviewed
-                          if (job.status == AppConstants.jobStatusCompleted && !job.hasReview && job.workerId != null)
-                            Align(
-                              alignment: Alignment.centerRight,
-                              child: ElevatedButton.icon(
-                                onPressed: () async {
-                                  try {
-                                    final workerDoc = await _firestore.collection(AppConstants.workersCollection).doc(job.workerId).get();
-                                    if (!workerDoc.exists) {
-                                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Worker information not available'), backgroundColor: Colors.red));
-                                      return;
-                                    }
-                                    final worker = WorkerModel.fromFirestore(workerDoc);
-
-                                    final result = await Navigator.of(context).push<bool?>(
-                                      MaterialPageRoute(
-                                        builder: (ctx) => SubmitReviewScreen(job: job, worker: worker),
-                                      ),
-                                    );
-
-                                    if (result == true) {
-                                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Thank you for your review!'), backgroundColor: Colors.green));
-                                    }
-                                  } catch (e) {
-                                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error opening review: ${e.toString()}'), backgroundColor: Colors.red));
-                                  }
-                                },
-                                icon: const Icon(Icons.rate_review),
-                                label: const Text('Leave Review'),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.purple,
-                                  foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                ),
               ],
-            ),
+            ],
           ),
         );
       },
     );
   }
 
-  String _statusForStep(int index) {
-    switch (index) {
-      case 1:
-        return AppConstants.jobStatusAccepted;
-      case 2:
-        return AppConstants.jobStatusInProgress;
-      case 3:
-        return AppConstants.jobStatusCompleted;
-      case 0:
-      default:
-        return AppConstants.jobStatusRequested;
-    }
+  Widget _buildHistoryJobCard(JobModel job) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.borderLight, width: 1.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.check_circle_outline_rounded, color: AppColors.admin, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(job.serviceType,
+                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+              ),
+              WcStatusBadge(label: 'Completed', color: AppColors.admin),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(job.address,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: AppColors.textSecondary, fontSize: 13)),
+          const SizedBox(height: 6),
+          Text(_formatJobTime(job.createdAt), style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
+          const SizedBox(height: 10),
+          if (job.agreedPrice != null)
+            if (job.isPaid)
+              Align(
+                alignment: Alignment.centerRight,
+                child: WcStatusBadge(
+                  label: job.paymentMethod == 'cash' ? 'Paid - Cash' : 'Paid - Card',
+                  color: AppColors.success,
+                  filled: true,
+                ),
+              )
+            else
+              Align(
+                alignment: Alignment.centerRight,
+                child: WcPrimaryButton(
+                  label: 'Pay \$${job.agreedPrice!.toStringAsFixed(2)}',
+                  icon: Icons.payment_rounded,
+                  backgroundColor: AppColors.success,
+                  onPressed: () => _showPaymentMethodSheet(job),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                ),
+              ),
+          if (job.status == AppConstants.jobStatusCompleted && !job.hasReview && job.workerId != null)
+            Align(
+              alignment: Alignment.centerRight,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: WcOutlinedButton(
+                  label: 'Leave Review',
+                  icon: Icons.rate_review_outlined,
+                  borderColor: AppColors.admin,
+                  textColor: AppColors.admin,
+                  onPressed: () async {
+                    try {
+                      final workerDoc = await _firestore
+                          .collection(AppConstants.workersCollection)
+                          .doc(job.workerId)
+                          .get();
+                      if (!mounted) return;
+                      if (!workerDoc.exists) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Worker not found')),
+                        );
+                        return;
+                      }
+                      final worker = WorkerModel.fromFirestore(workerDoc);
+                      final result = await Navigator.of(context).push<bool?>(
+                        MaterialPageRoute(builder: (_) => SubmitReviewScreen(job: job, worker: worker)),
+                      );
+                      if (!mounted) return;
+                      if (result == true) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Thank you for your review!'), backgroundColor: AppColors.success),
+                        );
+                      }
+                    } catch (e) {
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Error: ${e.toString()}'), backgroundColor: AppColors.error),
+                      );
+                    }
+                  },
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
   }
 
-  Widget _buildFeatureItem(IconData icon, String title, String subtitle) {
-    return Padding(
-      padding: EdgeInsets.only(bottom: 12),
-      child: Row(
+  // ── Bids Modal ────────────────────────────────────────────────────────
+  Future<void> _showBidsModal(JobModel job) async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.65,
+        minChildSize: 0.4,
+        maxChildSize: 0.92,
+        builder: (_, controller) => Container(
+          decoration: const BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            children: [
+              const SizedBox(height: 12),
+              Center(
+                child: Container(
+                  width: 36, height: 4,
+                  decoration: BoxDecoration(color: AppColors.borderLight, borderRadius: BorderRadius.circular(2)),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Row(
+                  children: [
+                    const Icon(Icons.gavel_rounded, color: AppColors.primary, size: 22),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Worker Bids', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+                          Text(job.serviceType, style: const TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(height: 1, color: AppColors.borderLight),
+              Expanded(
+                child: StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection(AppConstants.bidsCollection)
+                      .where('jobId', isEqualTo: job.id)
+                      .where('status', isEqualTo: AppConstants.bidStatusPending)
+                      .snapshots(),
+                  builder: (context, snap) {
+                    if (snap.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    final bids = snap.data?.docs.map((d) => BidModel.fromFirestore(d)).toList() ?? [];
+                    bids.sort((a, b) => a.amount.compareTo(b.amount));
+                    if (bids.isEmpty) {
+                      return const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(32),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.hourglass_empty_rounded, size: 48, color: AppColors.textMuted),
+                              SizedBox(height: 12),
+                              Text('No bids yet', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+                              SizedBox(height: 6),
+                              Text('Workers nearby will place bids soon.', style: TextStyle(fontSize: 13, color: AppColors.textMuted), textAlign: TextAlign.center),
+                            ],
+                          ),
+                        ),
+                      );
+                    }
+                    return ListView.separated(
+                      controller: controller,
+                      padding: const EdgeInsets.all(16),
+                      itemCount: bids.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 10),
+                      itemBuilder: (_, i) => _buildBidCard(bids[i], job, () {
+                        Navigator.pop(ctx);
+                        _acceptBid(job, bids[i]);
+                      }),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBidCard(BidModel bid, JobModel job, VoidCallback onAccept) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.background,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border, width: 1.5),
+        boxShadow: const [BoxShadow(color: Color(0x0A000000), blurRadius: 4, offset: Offset(0, 2))],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: Colors.blue, size: 20),
-          SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
+          Row(
+            children: [
+              Container(
+                width: 40, height: 40,
+                decoration: BoxDecoration(
+                  color: AppColors.primaryLight,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppColors.border, width: 1.5),
+                ),
+                child: Center(
+                  child: Text(
+                    bid.workerName.isNotEmpty ? bid.workerName[0].toUpperCase() : 'W',
+                    style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.w800, fontSize: 16),
                   ),
                 ),
-                Text(
-                  subtitle,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey[600],
-                  ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(bid.workerName, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                    Text(_formatJobTime(bid.createdAt), style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                  ],
                 ),
-              ],
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AppColors.successLight,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppColors.success.withValues(alpha: 0.4), width: 1.5),
+                ),
+                child: Text(
+                  '\$${bid.amount.toStringAsFixed(2)}',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.success),
+                ),
+              ),
+            ],
+          ),
+          if (bid.message != null && bid.message!.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppColors.infoLight,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.info.withValues(alpha: 0.2), width: 1),
+              ),
+              child: Text(bid.message!, style: const TextStyle(fontSize: 13, color: AppColors.textSecondary, height: 1.4)),
+            ),
+          ],
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: onAccept,
+              icon: const Icon(Icons.check_circle_outline, size: 18),
+              label: const Text('Accept This Bid', style: TextStyle(fontWeight: FontWeight.w700)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
             ),
           ),
         ],
@@ -1556,106 +1155,345 @@ class _CustomerLandingPageState extends State<CustomerLandingPage> {
     );
   }
 
-  Widget _buildJobTabs() {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
+  Future<void> _acceptBid(JobModel job, BidModel bid) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Accept Bid'),
+        content: Text('Hire ${bid.workerName} for \$${bid.amount.toStringAsFixed(2)}?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('No')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
+            child: const Text('Yes, Hire'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    try {
+      final batch = _firestore.batch();
+      batch.update(
+        _firestore.collection(AppConstants.jobsCollection).doc(job.id),
+        {
+          'workerId': bid.workerId,
+          'agreedPrice': bid.amount,
+          'status': AppConstants.jobStatusAccepted,
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+      );
+      batch.update(
+        _firestore.collection(AppConstants.bidsCollection).doc(bid.id),
+        {'status': AppConstants.bidStatusAccepted},
+      );
+      await batch.commit();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${bid.workerName} hired for \$${bid.amount.toStringAsFixed(2)}!'),
+          backgroundColor: AppColors.success,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to accept bid: $e'), backgroundColor: AppColors.error),
+      );
+    }
+  }
+
+  // ── Payment Sheet ─────────────────────────────────────────────────────
+  Future<void> _showPaymentMethodSheet(JobModel job) async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
         child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            TabBar(
-              indicatorColor: Colors.orange,
-              labelColor: Colors.orange,
-              unselectedLabelColor: Colors.grey,
-              tabs: const [
-                Tab(text: 'All'),
-                Tab(text: 'Pending'),
-                Tab(text: 'Completed'),
-                Tab(text: 'History'),
-              ],
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              height: 360,
-              child: TabBarView(
-                children: [
-                  // All
-                  _buildJobsStream((query) => query..orderBy('createdAt', descending: true)),
-                  // Pending (requested, accepted, in_progress)
-                  _buildJobsStream((query) => query.where('status', whereIn: [AppConstants.jobStatusRequested, AppConstants.jobStatusAccepted, AppConstants.jobStatusInProgress]).orderBy('createdAt', descending: true)),
-                  // Completed
-                  _buildJobsStream((query) => query.where('status', isEqualTo: AppConstants.jobStatusCompleted).orderBy('createdAt', descending: true)),
-                  // History (completed or cancelled)
-                  _buildJobsStream((query) => query.where('status', whereIn: [AppConstants.jobStatusCompleted, AppConstants.jobStatusCancelled]).orderBy('createdAt', descending: true)),
-                ],
+            Center(
+              child: Container(
+                width: 36, height: 4,
+                decoration: BoxDecoration(color: AppColors.borderLight, borderRadius: BorderRadius.circular(2)),
               ),
             ),
-            const SizedBox(height: 12),
-            // Quick tab shortcuts
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: [
-                TextButton.icon(onPressed: () => DefaultTabController.of(context).animateTo(0), icon: const Icon(Icons.list), label: const Text('All')),
-                TextButton.icon(onPressed: () => DefaultTabController.of(context).animateTo(1), icon: const Icon(Icons.schedule), label: const Text('Pending')),
-                TextButton.icon(onPressed: () => DefaultTabController.of(context).animateTo(2), icon: const Icon(Icons.check_circle), label: const Text('Completed')),
-                TextButton.icon(onPressed: () => DefaultTabController.of(context).animateTo(3), icon: const Icon(Icons.history), label: const Text('History')),
-              ],
+            const SizedBox(height: 16),
+            Text(
+              'Pay \$${job.agreedPrice!.toStringAsFixed(2)}',
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.textPrimary),
+            ),
+            const SizedBox(height: 6),
+            const Text('Choose your payment method', style: TextStyle(color: AppColors.textSecondary, fontSize: 14)),
+            const SizedBox(height: 20),
+            _PaymentOption(
+              icon: Icons.credit_card_rounded,
+              iconColor: AppColors.success,
+              iconBg: AppColors.successLight,
+              title: 'Pay by Card',
+              subtitle: 'Secure online payment via Stripe',
+              onTap: () => Navigator.pop(ctx, 'card'),
+            ),
+            const SizedBox(height: 10),
+            _PaymentOption(
+              icon: Icons.payments_outlined,
+              iconColor: AppColors.warning,
+              iconBg: AppColors.warningLight,
+              title: 'Pay in Cash',
+              subtitle: 'Hand cash directly to the worker',
+              onTap: () => Navigator.pop(ctx, 'cash'),
             ),
           ],
         ),
       ),
     );
+
+    if (choice == null || !mounted) return;
+
+    if (choice == 'cash') {
+      await _firestore.collection(AppConstants.jobsCollection).doc(job.id).update({
+        'isPaid': true, 'paymentMethod': 'cash', 'paidAt': FieldValue.serverTimestamp(),
+      });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cash payment recorded. Please pay the worker directly.'), backgroundColor: AppColors.warning),
+      );
+    } else {
+      try {
+        final paid = await StripeService.processCardPayment(
+          amount: job.agreedPrice!, jobId: job.id, customerId: widget.user.id, context: context,
+        );
+        if (paid) {
+          await _firestore.collection(AppConstants.jobsCollection).doc(job.id).update({
+            'isPaid': true, 'paymentMethod': 'card', 'paidAt': FieldValue.serverTimestamp(),
+          });
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Card payment successful!'), backgroundColor: AppColors.success),
+          );
+        }
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Payment failed: $e'), backgroundColor: AppColors.error),
+        );
+      }
+    }
   }
 
-  Widget _buildJobsStream(Query Function(Query) queryBuilder) {
-    final base = _firestore.collection(AppConstants.jobsCollection).where('customerId', isEqualTo: widget.user.id);
-    final query = queryBuilder(base);
+  // ── Helpers ───────────────────────────────────────────────────────────
+  String _formatJobTime(DateTime dt) {
+    final diff = DateTime.now().difference(dt);
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${dt.day}/${dt.month}/${dt.year}';
+  }
 
-    return StreamBuilder<QuerySnapshot>(
-      stream: query.snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-        if (snapshot.hasError) return Center(child: Text('Error loading jobs'));
+  int _getJobProgressIndex(String status) {
+    switch (status) {
+      case AppConstants.jobStatusAccepted:    return 1;
+      case AppConstants.jobStatusInProgress:  return 2;
+      case AppConstants.jobStatusCompleted:   return 3;
+      default:                                return 0;
+    }
+  }
 
-        final jobs = snapshot.data?.docs.map((d) => JobModel.fromFirestore(d)).toList() ?? [];
-        if (jobs.isEmpty) return Center(child: Text('No jobs found'));
+  String _getJobStatusLabel(String status) {
+    switch (status) {
+      case AppConstants.jobStatusAccepted:    return 'Worker Picked';
+      case AppConstants.jobStatusInProgress:  return 'In Progress';
+      case AppConstants.jobStatusCompleted:   return 'Completed';
+      default:                                return 'Open for Bids';
+    }
+  }
 
-        return ListView.separated(
-          padding: const EdgeInsets.all(12),
-          itemCount: jobs.length,
-          separatorBuilder: (c, i) => const SizedBox(height: 8),
-          itemBuilder: (c, i) {
-            final job = jobs[i];
-            final statusColor = _getJobStatusColor(job.status);
-            return Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.shade200)),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Row(children: [
-                  Expanded(child: Text(job.serviceType, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16))),
-                  Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: statusColor.withOpacity(0.12), borderRadius: BorderRadius.circular(16)), child: Text(_getJobStatusLabel(job.status), style: TextStyle(color: statusColor, fontWeight: FontWeight.bold))),
-                ]),
-                const SizedBox(height: 8),
-                Text(job.address, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Colors.grey[600])),
-                const SizedBox(height: 8),
-                Text(job.description, maxLines: 2, overflow: TextOverflow.ellipsis),
-                const SizedBox(height: 8),
-                Row(children: [
-                  if (job.agreedPrice != null) Text('\$${job.agreedPrice!.toStringAsFixed(2)}', style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)),
-                  const Spacer(),
-                  Text(_formatJobTime(job.createdAt), style: TextStyle(color: Colors.grey[600], fontSize: 12)),
-                ]),
-              ]),
-            );
-          },
+  Color _getJobStatusColor(String status) {
+    switch (status) {
+      case AppConstants.jobStatusAccepted:    return AppColors.success;
+      case AppConstants.jobStatusInProgress:  return AppColors.info;
+      case AppConstants.jobStatusCompleted:   return AppColors.admin;
+      default:                                return AppColors.primary;
+    }
+  }
+
+  String _statusForStep(int index) {
+    switch (index) {
+      case 1: return AppConstants.jobStatusAccepted;
+      case 2: return AppConstants.jobStatusInProgress;
+      case 3: return AppConstants.jobStatusCompleted;
+      default: return AppConstants.jobStatusRequested;
+    }
+  }
+
+  Widget _buildJobProgressStepper(int currentStep) {
+    const steps = [
+      ('Bids Open', Icons.gavel_rounded),
+      ('Worker Picked', Icons.check_circle_outline),
+      ('On the Way', Icons.directions_car_outlined),
+      ('Completed', Icons.verified_outlined),
+    ];
+
+    return Row(
+      children: List.generate(steps.length, (index) {
+        final isActive = index <= currentStep;
+        final isLast = index == steps.length - 1;
+        final color = isActive ? _getJobStatusColor(_statusForStep(index)) : AppColors.borderLight;
+
+        return Expanded(
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  children: [
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 300),
+                      curve: Curves.easeOut,
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        color: isActive ? color : AppColors.surfaceAlt,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: isActive ? color : AppColors.borderLight,
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Icon(steps[index].$2, size: 14, color: isActive ? Colors.white : AppColors.textMuted),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      steps[index].$1,
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      style: TextStyle(
+                        fontSize: 9,
+                        height: 1.2,
+                        fontWeight: isActive ? FontWeight.w700 : FontWeight.w400,
+                        color: isActive ? color : AppColors.textMuted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (!isLast)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 20),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 300),
+                    width: 14,
+                    height: 1.5,
+                    color: index < currentStep ? _getJobStatusColor(_statusForStep(index)) : AppColors.borderLight,
+                  ),
+                ),
+            ],
+          ),
         );
-      },
+      }),
+    );
+  }
+
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Hero action button (inside the hero card)
+// ─────────────────────────────────────────────────────────────────────────────
+class _HeroButton extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  const _HeroButton({required this.label, required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: AppColors.border, width: 1.5),
+          boxShadow: const [BoxShadow(color: AppColors.shadow, offset: Offset(2, 2), blurRadius: 0)],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 18, color: AppColors.primary),
+            const SizedBox(width: 7),
+            Text(label, style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.w700, fontSize: 13)),
+          ],
+        ),
+      ),
     );
   }
 }
 
-/// Widget that listens to a job document and displays live worker location on a small map.
+// ─────────────────────────────────────────────────────────────────────────────
+// Payment option tile
+// ─────────────────────────────────────────────────────────────────────────────
+class _PaymentOption extends StatelessWidget {
+  final IconData icon;
+  final Color iconColor;
+  final Color iconBg;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  const _PaymentOption({
+    required this.icon,
+    required this.iconColor,
+    required this.iconBg,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppColors.border, width: 1.5),
+          boxShadow: const [BoxShadow(color: AppColors.shadow, offset: Offset(3, 3), blurRadius: 0)],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40, height: 40,
+              decoration: BoxDecoration(color: iconBg, shape: BoxShape.circle),
+              child: Icon(icon, color: iconColor, size: 20),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: AppColors.textPrimary)),
+                  Text(subtitle, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right_rounded, color: AppColors.textMuted, size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// JobLiveMap — live worker tracking widget (business logic unchanged)
+// ─────────────────────────────────────────────────────────────────────────────
 class JobLiveMap extends StatefulWidget {
   final String jobId;
   final LocationModel initialLocation;
@@ -1668,57 +1506,68 @@ class JobLiveMap extends StatefulWidget {
 
 class _JobLiveMapState extends State<JobLiveMap> with SingleTickerProviderStateMixin {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  StreamSubscription<DocumentSnapshot>? _sub;
-  LatLng? _workerLatLng;
-  LatLng? _prevLatLng;
+  Timer? _pollTimer;
   Timer? _interpTimer;
   AnimationController? _pulseController;
+  LatLng? _workerLatLng;
+  LatLng? _prevLatLng;
+  LatLng? _jobCenter;
 
   @override
   void initState() {
     super.initState();
     _pulseController = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))..repeat();
+    // Fetch immediately, then every 5 seconds
+    _fetchWorkerLocation();
+    _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) => _fetchWorkerLocation());
+  }
 
-    _sub = _firestore.collection(AppConstants.jobsCollection).doc(widget.jobId).snapshots().listen((doc) {
-      final raw = doc.data();
-      final data = raw is Map<String, dynamic> ? raw : <String, dynamic>{};
-      GeoPoint? workerPoint = data['workerLocation'] is GeoPoint ? data['workerLocation'] as GeoPoint : null;
+  Future<void> _fetchWorkerLocation() async {
+    if (!mounted) return;
+    try {
+      final doc = await _firestore
+          .collection(AppConstants.jobsCollection)
+          .doc(widget.jobId)
+          .get();
+      if (!mounted) return;
+      final data = doc.data() ?? {};
 
-      if (workerPoint == null) {
-        setState(() {
-          _workerLatLng = null;
-        });
-        _cancelInterp();
-        return;
+      // Update job center on first fetch
+      if (_jobCenter == null && data['location'] is GeoPoint) {
+        final p = data['location'] as GeoPoint;
+        setState(() => _jobCenter = LatLng(p.latitude, p.longitude));
       }
 
-      final next = LatLng(workerPoint.latitude, workerPoint.longitude);
+      final gp = data['workerLocation'];
+      if (gp is! GeoPoint) {
+        if (_workerLatLng != null) setState(() => _workerLatLng = null);
+        return;
+      }
+      final next = LatLng(gp.latitude, gp.longitude);
       if (_workerLatLng == null) {
         setState(() => _workerLatLng = next);
-        return;
+      } else {
+        _prevLatLng = _workerLatLng;
+        _startInterpolation(_prevLatLng!, next);
       }
-
-      // Smoothly interpolate from previous to next over ~600ms
-      _prevLatLng = _workerLatLng;
-      _startInterpolation(_prevLatLng!, next);
-    });
+    } catch (_) {}
   }
 
   void _startInterpolation(LatLng from, LatLng to) {
     _cancelInterp();
-    const steps = 8;
+    const steps = 10;
     int step = 0;
-    _interpTimer = Timer.periodic(const Duration(milliseconds: 75), (t) {
+    _interpTimer = Timer.periodic(const Duration(milliseconds: 80), (t) {
       step++;
       final tVal = step / steps;
-      final lat = from.latitude + (to.latitude - from.latitude) * tVal;
-      final lng = from.longitude + (to.longitude - from.longitude) * tVal;
+      if (!mounted) { t.cancel(); return; }
       setState(() {
-        _workerLatLng = LatLng(lat, lng);
+        _workerLatLng = LatLng(
+          from.latitude  + (to.latitude  - from.latitude)  * tVal,
+          from.longitude + (to.longitude - from.longitude) * tVal,
+        );
       });
-      if (step >= steps) {
-        t.cancel();
-      }
+      if (step >= steps) t.cancel();
     });
   }
 
@@ -1729,7 +1578,7 @@ class _JobLiveMapState extends State<JobLiveMap> with SingleTickerProviderStateM
 
   @override
   void dispose() {
-    _sub?.cancel();
+    _pollTimer?.cancel();
     _interpTimer?.cancel();
     _pulseController?.dispose();
     super.dispose();
@@ -1737,315 +1586,81 @@ class _JobLiveMapState extends State<JobLiveMap> with SingleTickerProviderStateM
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<DocumentSnapshot>(
-      future: _firestore.collection(AppConstants.jobsCollection).doc(widget.jobId).get(),
-      builder: (context, snap) {
-        GeoPoint? jobPoint;
-        if (snap.hasData) {
-          final data = snap.data!.data() as Map<String, dynamic>? ?? {};
-          if (data['location'] is GeoPoint) jobPoint = data['location'] as GeoPoint;
-        }
+    final center = _jobCenter
+        ?? LatLng(widget.initialLocation.latitude, widget.initialLocation.longitude);
 
-        final center = jobPoint != null
-            ? LatLng(jobPoint.latitude, jobPoint.longitude)
-            : LatLng(widget.initialLocation.latitude, widget.initialLocation.longitude);
+    final markers = <Marker>{
+      Marker(
+        markerId: const MarkerId('job_location'),
+        position: center,
+        infoWindow: InfoWindow(title: 'Job Location', snippet: widget.initialLocation.address),
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+      ),
+    };
+    final circles = <Circle>{};
 
-        final markers = <Marker>{
-          Marker(
-            markerId: const MarkerId('job_location'),
-            position: center,
-            infoWindow: InfoWindow(title: 'Job Location', snippet: widget.initialLocation.address),
-            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-          ),
-        };
-
-        final circles = <Circle>{};
-        if (_workerLatLng != null) {
-          markers.add(Marker(
-            markerId: const MarkerId('worker_location'),
-            position: _workerLatLng!,
-            infoWindow: const InfoWindow(title: 'Worker'),
-            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-          ));
-
-          final pulseRadius = 20.0 + 40.0 * (_pulseController?.value ?? 0.0);
-          circles.add(Circle(
-            circleId: const CircleId('worker_pulse'),
-            center: _workerLatLng!,
-            radius: pulseRadius,
-            fillColor: Colors.green.withOpacity(0.12),
-            strokeColor: Colors.green.withOpacity(0.4),
-            strokeWidth: 1,
-          ));
-        }
-
-        return Stack(
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: GoogleMap(
-                initialCameraPosition: CameraPosition(target: center, zoom: 14),
-                markers: markers,
-                circles: circles,
-                zoomControlsEnabled: false,
-                myLocationEnabled: false,
-                liteModeEnabled: true,
-              ),
-            ),
-            if (_workerLatLng != null)
-              Positioned(
-                left: 8,
-                top: 8,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.red,
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 4)],
-                  ),
-                  child: Row(
-                    children: const [
-                      Icon(Icons.circle, color: Colors.white, size: 8),
-                      SizedBox(width: 6),
-                      Text('LIVE', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
-                    ],
-                  ),
-                ),
-              ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-/// Dialog widget for creating a job request
-/// Manages its own TextEditingController lifecycle to prevent disposal errors
-class _CreateJobDialog extends StatefulWidget {
-  final BuildContext parentContext;
-  final LocationModel? currentLocation;
-  final String? presetService;
-  final Future<void> Function({
-    required String serviceType,
-    required String description,
-    required String address,
-    required String budgetInput,
-    required LocationModel location,
-  }) onCreateJobRequest;
-
-  const _CreateJobDialog({
-    required this.parentContext,
-    required this.currentLocation,
-    required this.presetService,
-    required this.onCreateJobRequest,
-  });
-
-  @override
-  State<_CreateJobDialog> createState() => _CreateJobDialogState();
-}
-
-class _CreateJobDialogState extends State<_CreateJobDialog> {
-  late final TextEditingController descriptionController;
-  late final TextEditingController budgetController;
-  late final TextEditingController addressController;
-
-  String selectedService = '';
-  LocationModel? selectedLocation;
-  bool isSubmitting = false;
-
-  @override
-  void initState() {
-    super.initState();
-    descriptionController = TextEditingController();
-    budgetController = TextEditingController();
-    addressController = TextEditingController(
-      text: widget.currentLocation?.address ?? '',
-    );
-    selectedService = widget.presetService ?? AppConstants.serviceCategories.first;
-    selectedLocation = widget.currentLocation;
-  }
-
-  @override
-  void dispose() {
-    descriptionController.dispose();
-    budgetController.dispose();
-    addressController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _pickLocation() async {
-    final pickedLocation = await LocationPickerScreen.pickLocation(
-      context,
-      initialLocation: selectedLocation,
-      title: 'Select Job Location',
-    );
-
-    if (pickedLocation == null) return;
-
-    setState(() {
-      selectedLocation = pickedLocation;
-      if (pickedLocation.address != null && pickedLocation.address!.isNotEmpty) {
-        addressController.text = pickedLocation.address!;
-      }
-    });
-  }
-
-  Future<void> _submitRequest() async {
-    if (isSubmitting || selectedLocation == null) return;
-
-    setState(() {
-      isSubmitting = true;
-    });
-
-    try {
-      await widget.onCreateJobRequest(
-        serviceType: selectedService,
-        description: descriptionController.text,
-        address: addressController.text,
-        budgetInput: budgetController.text,
-        location: selectedLocation!,
-      );
-
-      if (!mounted) return;
-
-      Navigator.of(context).pop();
-      ScaffoldMessenger.of(widget.parentContext).showSnackBar(
-        const SnackBar(
-          content: Text('Job request created successfully'),
-          backgroundColor: Colors.green,
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(widget.parentContext).showSnackBar(
-        SnackBar(
-          content: Text(e.toString().replaceFirst('Exception: ', '')),
-          backgroundColor: Colors.red,
-        ),
-      );
-
-      setState(() {
-        isSubmitting = false;
-      });
+    if (_workerLatLng != null) {
+      markers.add(Marker(
+        markerId: const MarkerId('worker_location'),
+        position: _workerLatLng!,
+        infoWindow: const InfoWindow(title: 'Worker'),
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+      ));
+      final pulseRadius = 20.0 + 40.0 * (_pulseController?.value ?? 0.0);
+      circles.add(Circle(
+        circleId: const CircleId('worker_pulse'),
+        center: _workerLatLng!,
+        radius: pulseRadius,
+        fillColor: AppColors.success.withValues(alpha: 0.12),
+        strokeColor: AppColors.success.withValues(alpha: 0.4),
+        strokeWidth: 1,
+      ));
     }
-  }
 
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Create Job Request'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            DropdownButtonFormField<String>(
-              initialValue: selectedService,
-              decoration: const InputDecoration(
-                labelText: 'Service Category',
-                border: OutlineInputBorder(),
-              ),
-              items: AppConstants.serviceCategories
-                  .map(
-                    (service) => DropdownMenuItem(
-                      value: service,
-                      child: Text(service),
-                    ),
-                  )
-                  .toList(),
-              onChanged: isSubmitting
-                  ? null
-                  : (value) {
-                      if (value == null) return;
-                      setState(() {
-                        selectedService = value;
-                      });
-                    },
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: descriptionController,
-              maxLines: 4,
-              decoration: const InputDecoration(
-                labelText: 'Job Description',
-                hintText: 'Describe what needs to be done',
-                border: OutlineInputBorder(),
-              ),
-              enabled: !isSubmitting,
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: budgetController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Budget (optional)',
-                prefixText: '\$',
-                hintText: 'e.g. 50',
-                border: OutlineInputBorder(),
-              ),
-              enabled: !isSubmitting,
-            ),
-            const SizedBox(height: 12),
-            const SizedBox(height: 12),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
+    return Stack(
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: GoogleMap(
+            initialCameraPosition: CameraPosition(target: center, zoom: 14),
+            markers: markers,
+            circles: circles,
+            zoomControlsEnabled: false,
+            myLocationEnabled: false,
+            liteModeEnabled: true,
+          ),
+        ),
+        Positioned.fill(
+          child: IgnorePointer(
+            child: Container(
               decoration: BoxDecoration(
-                color: Colors.blue.shade50,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.blue.shade100),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.border, width: 1.5),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+            ),
+          ),
+        ),
+        if (_workerLatLng != null)
+          Positioned(
+            left: 8,
+            top: 8,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: AppColors.error,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: AppColors.border, width: 1),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    'Selected Location',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.blue.shade800,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    selectedLocation?.address ??
-                        (selectedLocation != null
-                            ? '${selectedLocation!.latitude.toStringAsFixed(4)}, ${selectedLocation!.longitude.toStringAsFixed(4)}'
-                            : 'No location selected'),
-                    style: TextStyle(color: Colors.blue.shade700),
-                  ),
-                  const SizedBox(height: 8),
-                  OutlinedButton.icon(
-                    onPressed: isSubmitting ? null : _pickLocation,
-                    icon: const Icon(Icons.map_outlined),
-                    label: const Text('Choose on Map'),
-                  ),
+                  Icon(Icons.circle, color: Colors.white, size: 6),
+                  SizedBox(width: 5),
+                  Text('LIVE', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 11, letterSpacing: 0.5)),
                 ],
               ),
             ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: isSubmitting ? null : () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        ElevatedButton(
-          onPressed: isSubmitting ? null : _submitRequest,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.orange,
-            foregroundColor: Colors.white,
           ),
-          child: isSubmitting
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Colors.white,
-                  ),
-                )
-              : const Text('Create Request'),
-        ),
       ],
     );
   }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -6,6 +7,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:geolocator/geolocator.dart';
 
+import '../../../../data/models/bid_model.dart';
 import '../../../../data/models/job_model.dart';
 import '../../../../data/models/user_model.dart';
 import '../../../../data/models/location_model.dart';
@@ -44,6 +46,7 @@ class _JobsMapScreenState extends State<JobsMapScreen> {
   double _searchRadius = 15.0; // km
 
   StreamSubscription? _jobsSubscription;
+  Timer? _locationPollTimer;
 
   @override
   void initState() {
@@ -57,6 +60,7 @@ class _JobsMapScreenState extends State<JobsMapScreen> {
   @override
   void dispose() {
     _jobsSubscription?.cancel();
+    _locationPollTimer?.cancel();
     _mapController?.dispose();
     super.dispose();
   }
@@ -72,16 +76,55 @@ class _JobsMapScreenState extends State<JobsMapScreen> {
       }
     }
 
-    // Default to San Francisco if no location
+    // Default to Sri Lanka if no location
     _currentLocation ??= LocationModel(
-      latitude: 37.7749,
-      longitude: -122.4194,
+      latitude: 7.8731,
+      longitude: 80.7718,
     );
 
-    // Update worker's location in database
-    _updateWorkerLocation();
-    
+    await _updateWorkerLocation();
     _loadNearbyJobs();
+
+    // Poll location every 5 seconds instead of using Google Maps live location
+    _locationPollTimer = Timer.periodic(const Duration(seconds: 5), (_) => _pollLocation());
+  }
+
+  Future<void> _pollLocation() async {
+    if (!mounted) return;
+    try {
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+      );
+      _currentLocation = LocationModel(latitude: pos.latitude, longitude: pos.longitude);
+      await _updateWorkerLocation();
+      _updateMyLocationMarker();
+    } catch (_) {}
+  }
+
+  void _updateMyLocationMarker() {
+    if (!mounted || _currentLocation == null) return;
+    final myPos = LatLng(_currentLocation!.latitude, _currentLocation!.longitude);
+    setState(() {
+      _markers = {
+        ..._markers.where((m) => m.markerId.value != 'current_location'),
+        Marker(
+          markerId: const MarkerId('current_location'),
+          position: myPos,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+          infoWindow: const InfoWindow(title: 'Your Location'),
+        ),
+      };
+      _circles = {
+        Circle(
+          circleId: const CircleId('search_radius'),
+          center: myPos,
+          radius: _searchRadius * 1000,
+          fillColor: Colors.green.withValues(alpha: 0.1),
+          strokeColor: Colors.green.withValues(alpha: 0.5),
+          strokeWidth: 2,
+        ),
+      };
+    });
   }
 
   Future<void> _updateWorkerLocation() async {
@@ -94,10 +137,15 @@ class _JobsMapScreenState extends State<JobsMapScreen> {
           'locationUpdatedAt': FieldValue.serverTimestamp(),
           'isOnline': true,
         });
-      } catch (e) {
-        print('Error updating worker location: $e');
-      }
+      } catch (_) {}
     }
+  }
+
+  ImageProvider _resolveImage(String path) {
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      return NetworkImage(path);
+    }
+    return FileImage(File(path));
   }
 
   Future<void> _loadNearbyJobs() async {
@@ -225,37 +273,121 @@ class _JobsMapScreenState extends State<JobsMapScreen> {
     }
   }
 
-  Future<void> _claimJob(JobModel job) async {
+  Future<void> _showPlaceBidDialog(JobModel job) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
+    final amountCtrl = TextEditingController();
+    final messageCtrl = TextEditingController();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Place a Bid'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Service: ${job.serviceType}',
+                style: const TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            Text(job.address,
+                style: TextStyle(fontSize: 13, color: Colors.grey[700]),
+                maxLines: 2),
+            const SizedBox(height: 16),
+            const Text('Your bid amount',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            TextField(
+              controller: amountCtrl,
+              autofocus: true,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: InputDecoration(
+                prefixIcon: const Icon(Icons.attach_money),
+                hintText: '0.00',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text('Note to customer (optional)',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            TextField(
+              controller: messageCtrl,
+              maxLines: 2,
+              maxLength: 200,
+              decoration: InputDecoration(
+                hintText: 'e.g. I have 5 years of experience with this...',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () => Navigator.pop(ctx, true),
+            icon: const Icon(Icons.gavel, size: 16),
+            label: const Text('Submit Bid'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green,
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    final amount = double.tryParse(amountCtrl.text.trim());
+    if (amount == null || amount <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter a valid bid amount.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     try {
-      final jobRef = _firestore.collection(AppConstants.jobsCollection).doc(job.id);
+      // Fetch worker's display name
+      final workerDoc = await _firestore
+          .collection(AppConstants.workersCollection)
+          .doc(user.uid)
+          .get();
+      final workerName = workerDoc.exists
+          ? (workerDoc.data()?['name'] as String? ?? 'Worker')
+          : 'Worker';
 
-      await _firestore.runTransaction((transaction) async {
-        final freshSnap = await transaction.get(jobRef);
-        if (!freshSnap.exists) {
-          throw Exception('This job is no longer available.');
-        }
+      final bid = BidModel(
+        id: '',
+        jobId: job.id,
+        workerId: user.uid,
+        workerName: workerName,
+        amount: amount,
+        message: messageCtrl.text.trim().isEmpty ? null : messageCtrl.text.trim(),
+        status: AppConstants.bidStatusPending,
+        createdAt: DateTime.now(),
+      );
 
-        final freshJob = JobModel.fromFirestore(freshSnap);
-        if (freshJob.status != AppConstants.jobStatusRequested || freshJob.workerId != null) {
-          throw Exception('This job has already been claimed by another worker.');
-        }
-
-        transaction.update(jobRef, {
-          'workerId': user.uid,
-          'status': AppConstants.jobStatusAccepted,
-          'acceptedAt': FieldValue.serverTimestamp(),
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
-      });
+      await _firestore
+          .collection(AppConstants.bidsCollection)
+          .add(bid.toFirestore());
 
       if (!mounted) return;
       Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Job claimed successfully.'),
+        SnackBar(
+          content: Text('Bid of \$${amount.toStringAsFixed(2)} submitted!'),
           backgroundColor: Colors.green,
         ),
       );
@@ -264,7 +396,7 @@ class _JobsMapScreenState extends State<JobsMapScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Could not claim job: $e'),
+          content: Text('Could not submit bid: $e'),
           backgroundColor: Colors.red,
         ),
       );
@@ -373,7 +505,7 @@ class _JobsMapScreenState extends State<JobsMapScreen> {
                         onMapCreated: _onMapCreated,
                         markers: _markers,
                         circles: _circles,
-                        myLocationEnabled: true,
+                        myLocationEnabled: false,
                         myLocationButtonEnabled: false,
                         zoomControlsEnabled: false,
                       ),
@@ -611,7 +743,7 @@ class _JobsMapScreenState extends State<JobsMapScreen> {
                     borderRadius: BorderRadius.circular(8),
                   ),
                 ),
-                child: const Text('View & Accept', style: TextStyle(fontSize: 12)),
+                child: const Text('Place a Bid', style: TextStyle(fontSize: 12)),
               ),
             ),
           ],
@@ -826,7 +958,7 @@ class _JobsMapScreenState extends State<JobsMapScreen> {
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(8),
                           image: DecorationImage(
-                            image: NetworkImage(job.imageUrls[index]),
+                            image: _resolveImage(job.imageUrls[index]),
                             fit: BoxFit.cover,
                           ),
                         ),
@@ -837,13 +969,13 @@ class _JobsMapScreenState extends State<JobsMapScreen> {
                 const SizedBox(height: 24),
               ],
 
-              // Claim button
+              // Place bid button
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
-                  onPressed: () => _claimJob(job),
-                  icon: const Icon(Icons.assignment_turned_in),
-                  label: const Text('Claim This Job'),
+                  onPressed: () => _showPlaceBidDialog(job),
+                  icon: const Icon(Icons.gavel),
+                  label: const Text('Place a Bid'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.green,
                     foregroundColor: Colors.white,

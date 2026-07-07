@@ -16,13 +16,14 @@ class AuthRepository {
   // Sign in with email and password
   Future<UserModel?> signInWithEmail(String email, String password) async {
     try {
+      // Sign in with Firebase Auth first, then load the matching Firestore profile.
       UserCredential userCredential = await _firebaseAuth.signInWithEmailAndPassword(
         email: email,
         password: password,
       );
 
       if (userCredential.user != null) {
-        // Try to get user data from Firestore, but don't fail if Firestore has issues
+        // Try to get user data from Firestore, but don't fail if Firestore has issues.
         try {
           DocumentSnapshot userDoc = await _firestore
               .collection(AppConstants.usersCollection)
@@ -30,12 +31,11 @@ class AuthRepository {
               .get();
 
           if (userDoc.exists) {
-            // User document exists - return it without modification
+            // Existing profile found, so return it as-is.
             print("Login successful: Loading existing user data");
             return UserModel.fromFirestore(userDoc);
           } else {
-            // User exists in Firebase Auth but not in Firestore (rare case)
-            // This should only happen for legacy users or if the document was deleted
+            // Auth succeeded but the profile document is missing, which can happen for legacy users.
             print("User has no Firestore document, creating new one with default role");
             
             UserModel userModel = UserModel(
@@ -57,7 +57,7 @@ class AuthRepository {
             return userModel;
           }
         } catch (firestoreError) {
-          // Firestore failed but Firebase Auth succeeded - return basic user model
+          // Firestore failed but Firebase Auth succeeded, so return a minimal in-memory profile.
           print("Firestore error, but auth succeeded: $firestoreError");
           return UserModel(
             id: userCredential.user!.uid,
@@ -86,13 +86,14 @@ class AuthRepository {
     required String role,
   }) async {
     try {
+      // Create the authentication record first, then persist the app profile in Firestore.
       UserCredential userCredential = await _firebaseAuth.createUserWithEmailAndPassword(
         email: email,
         password: password,
       );
 
       if (userCredential.user != null) {
-        // Create user document in Firestore
+        // Build the user document that the rest of the app will read from Firestore.
         UserModel userModel = UserModel(
           id: userCredential.user!.uid,
           name: name,
@@ -109,7 +110,7 @@ class AuthRepository {
               .doc(userCredential.user!.uid)
               .set(userModel.toFirestore());
         } catch (firestoreError) {
-          // Firestore failed but registration succeeded
+          // Registration still succeeded even if the profile write failed.
           print("Firestore error during registration, but auth succeeded: $firestoreError");
         }
 
@@ -130,6 +131,7 @@ class AuthRepository {
   // Get user data
   Future<UserModel?> getUserData(String userId) async {
     try {
+      // Read the profile document for this user and create a fallback record if it is missing.
       DocumentSnapshot userDoc = await _firestore
           .collection(AppConstants.usersCollection)
           .doc(userId)
@@ -138,22 +140,21 @@ class AuthRepository {
       if (userDoc.exists) {
         return UserModel.fromFirestore(userDoc);
       } else {
-        // Check if this is the current authenticated user
+        // Only auto-create a profile for the user that is actually signed in.
         User? currentFirebaseUser = _firebaseAuth.currentUser;
         if (currentFirebaseUser != null && currentFirebaseUser.uid == userId) {
-          // Double-check the document doesn't exist to avoid race conditions
+          // Re-check the document to avoid a race if another flow created it a moment earlier.
           DocumentSnapshot recheckDoc = await _firestore
               .collection(AppConstants.usersCollection)
               .doc(userId)
               .get();
           
           if (recheckDoc.exists) {
-            // Document was created in the meantime, return it
+            // The profile appeared during the re-check, so use the latest copy.
             return UserModel.fromFirestore(recheckDoc);
           }
           
-          // Create user document for authenticated user who doesn't have Firestore doc
-          // ONLY if it truly doesn't exist
+          // Create a default profile only when the signed-in user has no Firestore document.
           UserModel userModel = UserModel(
             id: userId,
             name: currentFirebaseUser.displayName ?? 'Unknown User',
@@ -164,7 +165,7 @@ class AuthRepository {
             updatedAt: DateTime.now(),
           );
 
-          // Use regular set (not merge) since we confirmed document doesn't exist
+          // Use set without merge because the document is known to be absent.
           await _firestore
               .collection(AppConstants.usersCollection)
               .doc(userId)
@@ -184,6 +185,7 @@ class AuthRepository {
   // Update user data
   Future<bool> updateUserData(UserModel userModel) async {
     try {
+      // Save the latest profile fields and refresh the updated timestamp.
       await _firestore
           .collection(AppConstants.usersCollection)
           .doc(userModel.id)
@@ -198,6 +200,7 @@ class AuthRepository {
   // Reset password
   Future<bool> resetPassword(String email) async {
     try {
+      // Delegate password recovery to Firebase Auth.
       await _firebaseAuth.sendPasswordResetEmail(email: email);
       return true;
     } catch (e) {
@@ -209,6 +212,7 @@ class AuthRepository {
   // Update user approval status
   Future<bool> updateUserApprovalStatus(String userId, bool isApproved) async {
     try {
+      // Approval is app-specific state, so it is stored in Firestore.
       await _firestore
           .collection(AppConstants.usersCollection)
           .doc(userId)
@@ -226,6 +230,7 @@ class AuthRepository {
   // Check if worker is approved
   Future<bool> isWorkerApproved(String userId) async {
     try {
+      // Read the Firestore flag that controls worker access.
       final doc = await _firestore
           .collection(AppConstants.usersCollection)
           .doc(userId)
@@ -245,6 +250,7 @@ class AuthRepository {
   // Get user role
   Future<String?> getUserRole(String userId) async {
     try {
+      // Role is stored in the user profile document, not in Firebase Auth.
       final doc = await _firestore
           .collection(AppConstants.usersCollection)
           .doc(userId)

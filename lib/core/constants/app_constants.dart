@@ -14,6 +14,11 @@ class AppConstants {
   static const String jobStatusInProgress = 'in_progress';
   static const String jobStatusCompleted = 'completed';
   static const String jobStatusCancelled = 'cancelled';
+
+  // Bid Status
+  static const String bidStatusPending = 'pending';
+  static const String bidStatusAccepted = 'accepted';
+  static const String bidStatusWithdrawn = 'withdrawn';
   
   // Service Categories
   static const List<String> serviceCategories = [
@@ -33,6 +38,7 @@ class AppConstants {
   static const String usersCollection = 'users';
   static const String workersCollection = 'workers';
   static const String jobsCollection = 'jobs';
+  static const String bidsCollection = 'bids';
   static const String reviewsCollection = 'reviews';
   static const String chatCollection = 'chats';
   
